@@ -12,6 +12,14 @@ function computePath(node, root) {
     return path;
 }
 
+function getOffset(el) {
+    const rect = el.getBoundingClientRect();
+    return {
+        left: `${rect.left + window.scrollX}px`,
+        top: `${rect.bottom + window.scrollY}px`
+    };
+}
+
 // eslint-disable-next-line no-unused-vars
 class InPageTranslation {
 
@@ -131,6 +139,24 @@ class InPageTranslation {
         }
         this.startTreeWalker(document.body);
         this.startMutationObserver();
+
+        const popup = document.createElement('div');
+        popup.style.position = 'absolute';
+        popup.style.zIndex = 2147483647;
+        popup.style.top = '0px';
+        popup.style.left = '0px';
+        document.body.appendChild(popup);
+
+        document.body.addEventListener('mouseover', e => {
+            if (!e.target.hasAttribute('x-bergamot-word-score')) {
+                popup.style.display = 'none';
+                return;
+            }
+
+            Object.assign(popup.style, getOffset(e.target));
+            popup.style.display = '';
+            popup.innerText = `${e.target.getAttribute('x-bergamot-word-score')}`;
+        })
     }
 
     addDebugStylesheet() {
@@ -448,7 +474,7 @@ class InPageTranslation {
                 // src (translated) dictates the order.
                 Array.from(src.childNodes).forEach(child => {
                     // Element nodes we try to use the already existing DOM nodes
-                    if (child.nodeType === Node.ELEMENT_NODE) {
+                    if (child.nodeType === Node.ELEMENT_NODE && !child.hasAttribute('x-bergamot-sentence-score') && !child.hasAttribute('x-bergamot-word-score')) {
                         // Find an element in the live tree that matches the
                         // one in the translated tree.
                         let counterpart = dstChildNodes[child.dataset.xBergamotId];
