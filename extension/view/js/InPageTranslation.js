@@ -169,6 +169,16 @@ class InPageTranslation {
             popup.style.display = '';
             popup.innerText = `${e.target.getAttribute('x-bergamot-word-score')}`;
         })
+
+        document.body.addEventListener('mouseover', e => {
+            const root = e.target.closest('[x-bergamot-translated]');
+            if (!root) return;
+
+            const sentenceIdx = e.target.parentNode.getAttribute('x-bergamot-sentence-index');  // may be undefined, which is okay
+            root.querySelectorAll('[x-bergamot-sentence-index]').forEach(el => {
+                el.classList.toggle('x-bergamot-highlight', el.getAttribute('x-bergamot-sentence-index') === sentenceIdx);
+            });
+        })
     }
 
     addDebugStylesheet() {
@@ -181,6 +191,7 @@ class InPageTranslation {
         sheet.insertRule('html[x-bergamot-debug] [x-bergamot-translated~="rejected"] { border: 2px solid yellow; }', 2);
         sheet.insertRule('html[x-bergamot-debug] [x-bergamot-translated=""] { border: 2px solid blue; }', 3);
         sheet.insertRule('html[x-bergamot-debug] [x-bergamot-translated=""] [x-bergamot-translated~="is-excluded-node"] { border: 4px dashed red; }', 4);
+        sheet.insertRule('.x-bergamot-highlight { background: rgba(255, 255, 0, 0.8); }', 5);
     }
 
     startTreeWalker(root) {
