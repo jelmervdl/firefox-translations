@@ -114,6 +114,10 @@ class InPageTranslation {
             // Let's stay away from translating prefilled forms
             'textarea',
 
+            // Don't enter templates. We'll translate them once they become
+            // part of the page proper.
+            'template',
+
             // handled in isExcludedNode
             // `*[lang]:not([lang|=${language}])`
         ])
@@ -178,15 +182,12 @@ class InPageTranslation {
 
         const nodeIterator = document.createTreeWalker(
             root,
-            // eslint-disable-next-line no-bitwise
             NodeFilter.SHOW_ELEMENT,
             acceptNode
         );
 
         let currentNode;
-        // eslint-disable-next-line no-cond-assign
         while (currentNode = nodeIterator.nextNode()) {
-            // console.log('startTreeWalker - root:', root, 'currentnode', currentNode, 'nodehidden:', this.isElementHidden(currentNode.parentNode), 'nodeinViewPort:', this.isElementInViewport(currentNode.parentNode), 'nodeType:', currentNode.nodeType, 'tagName:', currentNode.tagName, 'content:', currentNode.innerHTML, 'wholeText:', currentNode.wholeText.trim());
             this.queueTranslation(currentNode);
         }
 
@@ -407,7 +408,7 @@ class InPageTranslation {
                         mutation.addedNodes.forEach(node => this.startTreeWalker(node));
                         break;
                     case "characterData":
-                        this.startTreewalker(mutation.target.parentNode);
+                        this.startTreeWalker(mutation.target.parentNode);
                         break;
                 }
             }
