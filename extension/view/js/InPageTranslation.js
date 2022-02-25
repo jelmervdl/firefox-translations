@@ -145,11 +145,19 @@ class InPageTranslation {
         this.startMutationObserver();
 
         const popup = document.createElement('div');
-        popup.style.position = 'absolute';
-        popup.style.zIndex = 2147483647;
-        popup.style.top = '0px';
-        popup.style.left = '0px';
         document.body.appendChild(popup);
+        Object.assign(popup.style, {
+            position: 'absolute',
+            zIndex: 2147483647,
+            top: '0px',
+            left: '0px',
+            pointerEvents: 'none',
+            background: 'white',
+            padding: '2px',
+            font: '10px/14px sans-serif',
+            border: '1px solid rgba(0, 0, 0, 0.5)',
+            boxShadow: '1px 1px 5px rgba(0, 0, 0, 0.5)'
+        });
 
         document.body.addEventListener('mouseover', e => {
             if (!e.target.hasAttribute('x-bergamot-word-score')) {
