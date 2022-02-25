@@ -12,6 +12,14 @@ function computePath(node, root) {
     return path;
 }
 
+function getOffset(el) {
+    const rect = el.getBoundingClientRect();
+    return {
+        left: `${rect.left + window.scrollX}px`,
+        top: `${rect.bottom + window.scrollY}px`
+    };
+}
+
 // eslint-disable-next-line no-unused-vars
 class InPageTranslation {
 
@@ -135,6 +143,42 @@ class InPageTranslation {
         }
         this.startTreeWalker(document.body);
         this.startMutationObserver();
+
+        const popup = document.createElement('div');
+        document.body.appendChild(popup);
+        Object.assign(popup.style, {
+            position: 'absolute',
+            zIndex: 2147483647,
+            top: '0px',
+            left: '0px',
+            pointerEvents: 'none',
+            background: 'white',
+            padding: '2px',
+            font: '10px/14px sans-serif',
+            border: '1px solid rgba(0, 0, 0, 0.5)',
+            boxShadow: '1px 1px 5px rgba(0, 0, 0, 0.5)'
+        });
+
+        document.body.addEventListener('mouseover', e => {
+            if (!e.target.hasAttribute('x-bergamot-word-score')) {
+                popup.style.display = 'none';
+                return;
+            }
+
+            Object.assign(popup.style, getOffset(e.target));
+            popup.style.display = '';
+            popup.innerText = `${e.target.getAttribute('x-bergamot-word-score')}`;
+        })
+
+        document.body.addEventListener('mouseover', e => {
+            const root = e.target.closest('[x-bergamot-translated]');
+            if (!root) return;
+
+            const sentenceIdx = e.target.parentNode.getAttribute('x-bergamot-sentence-index');  // may be undefined, which is okay
+            root.querySelectorAll('[x-bergamot-sentence-index]').forEach(el => {
+                el.classList.toggle('x-bergamot-highlight', el.getAttribute('x-bergamot-sentence-index') === sentenceIdx);
+            });
+        })
     }
 
     addDebugStylesheet() {
@@ -147,6 +191,7 @@ class InPageTranslation {
         sheet.insertRule('html[x-bergamot-debug] [x-bergamot-translated~="rejected"] { border: 2px solid yellow; }', 2);
         sheet.insertRule('html[x-bergamot-debug] [x-bergamot-translated=""] { border: 2px solid blue; }', 3);
         sheet.insertRule('html[x-bergamot-debug] [x-bergamot-translated=""] [x-bergamot-translated~="is-excluded-node"] { border: 4px dashed red; }', 4);
+        sheet.insertRule('.x-bergamot-highlight { background: rgba(255, 255, 0, 0.8); }', 5);
     }
 
     startTreeWalker(root) {
@@ -449,7 +494,9 @@ class InPageTranslation {
                 // src (translated) dictates the order.
                 Array.from(src.childNodes).forEach(child => {
                     // Element nodes we try to use the already existing DOM nodes
-                    if (child.nodeType === Node.ELEMENT_NODE) {
+                    // (Except for our metadata bearing `<font>` tags, those
+                    // definitely don't exist in the document yet.)
+                    if (child.nodeType === Node.ELEMENT_NODE && !child.hasAttribute('x-bergamot-sentence-index') && !child.hasAttribute('x-bergamot-word-index')) {
                         // Find an element in the live tree that matches the
                         // one in the translated tree.
                         let counterpart = dstChildNodes[child.dataset.xBergamotId];

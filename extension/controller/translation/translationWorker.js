@@ -81,7 +81,7 @@ class TranslationWorker {
         mini-batch-words: 1024
         workspace: 128
         max-length-factor: 2.0
-        skip-cost: true
+        skip-cost: false
         cpu-threads: 0
         quiet: true
         quiet-translation: true
@@ -120,7 +120,7 @@ class TranslationWorker {
 
         // Extracts the texts[].html options into ResponseOption objects
         let options = new Module.VectorResponseOptions();
-        texts.forEach(({html}) => options.push_back({qualityScores: false, alignment: false, html}));
+        texts.forEach(({html}) => options.push_back({qualityScores: true, alignment: false, html}));
 
         // Turn our model names into a list of TranslationModel pointers
         const translationModels = models.map(({from,to}) => {
