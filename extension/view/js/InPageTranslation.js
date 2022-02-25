@@ -494,7 +494,9 @@ class InPageTranslation {
                 // src (translated) dictates the order.
                 Array.from(src.childNodes).forEach(child => {
                     // Element nodes we try to use the already existing DOM nodes
-                    if (child.nodeType === Node.ELEMENT_NODE && !child.hasAttribute('x-bergamot-sentence-score') && !child.hasAttribute('x-bergamot-word-score')) {
+                    // (Except for our metadata bearing `<font>` tags, those
+                    // definitely don't exist in the document yet.)
+                    if (child.nodeType === Node.ELEMENT_NODE && !child.hasAttribute('x-bergamot-sentence-index') && !child.hasAttribute('x-bergamot-word-index')) {
                         // Find an element in the live tree that matches the
                         // one in the translated tree.
                         let counterpart = dstChildNodes[child.dataset.xBergamotId];
