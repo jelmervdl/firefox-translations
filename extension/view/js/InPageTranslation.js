@@ -891,6 +891,8 @@ class InPageTranslation {
             if (this.withQualityEstimation) this.addQualityClasses();
         } finally {
             this.startMutationObserver();
+
+            window.eval('window.$BergamotResetMutationObservers()');
         }
     }
 
