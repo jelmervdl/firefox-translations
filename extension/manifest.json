@@ -7,7 +7,7 @@
 	{
 		"gecko":
 		{
-			"strict_min_version": "79.0",
+			"strict_min_version": "90.0",
 			"id": "{c9cdf885-0431-4eed-8e18-967b1758c951}"
 		}
 	},
@@ -35,14 +35,28 @@
 			],
 			"js":
 			[
+				"view/js/MutationObserver.js"
+			],
+			"run_at": "document_start",
+			"all_frames": true
+		},
+		{
+			"matches":
+			[
+				"<all_urls>"
+			],
+			"js":
+			[
 				"controller/translation/compat.js",
 				"controller/LanguageDetection.js",
 				"view/js/InPageTranslation.js",
-				"contentScript.js"
+				"view/js/SelectionTranslation.js",
+				"controller/contentScript.js"
 			],
 			"css":
 			[
-				"view/InPageTranslation.css"
+				"view/InPageTranslation.css",
+				"view/SelectionTranslation.css"
 			],
 			"run_at": "document_idle",
 			"all_frames": true

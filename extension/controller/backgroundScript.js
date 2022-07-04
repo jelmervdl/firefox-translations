@@ -14,13 +14,6 @@ function isSameDomain(url1, url2) {
     return url1 && url2 && new URL(url1).host === new URL(url2).host;
 }
 
-// Temporary fix around few models, bad classified, and similar looking languages.
-// From https://github.com/bitextor/bicleaner/blob/3df2b2e5e2044a27b4f95b83710be7c751267e5c/bicleaner/bicleaner_hardrules.py#L50
-const SimilarLanguages = [
-    new Set(['es', 'ca', 'gl', 'pt']),
-    new Set(['no', 'nb', 'nn', 'da']) // no == nb for bicleaner
-];
-
 // Just a little test to run in the web inspector for debugging
 async function test(provider) {
     console.log(await Promise.all([
@@ -39,9 +32,34 @@ async function test(provider) {
 }
 
 /**
+ * Temporary fix around few models, bad classified, and similar looking languages.
+ * From https://github.com/bitextor/bicleaner/blob/3df2b2e5e2044a27b4f95b83710be7c751267e5c/bicleaner/bicleaner_hardrules.py#L50
+ * @type {Set<String>[]}
+ */
+const SimilarLanguages = [
+    new Set(['es', 'ca', 'gl', 'pt']),
+    new Set(['no', 'nb', 'nn', 'da']) // no == nb for bicleaner
+];
+
+/**
+ * @typedef {Object} TranslationModel
+ * @property {String} from
+ * @property {String} to
+ * @property {Boolean} local
+ */
+
+/**
+ * @typedef {Object} TranslationProvider
+ * @property {Promise<TranslationModel[]>} registry
+ */ 
+
+/**
  * Language detection function that also provides a sorted list of
  * from->to language pairs, based on the detected language, the preferred
  * target language, and what models are available.
+ * @param {{sample:String, suggested:{[lang:String]: Number}}}
+ * @param {TranslationProvider} provider
+ * @return {Promise<{from:String|Undefined, to:String|Undefined, models: TranslationModel[]}>}
  */
 async function detectLanguage({sample, suggested}, provider) {
     if (!sample)
@@ -65,6 +83,7 @@ async function detectLanguage({sample, suggested}, provider) {
     ];
 
     // {[lang]: 0.0 .. 1.0} map of likeliness the page is in this language
+    /** @type {{[lang:String]: Number }} **/
     let confidence = Object.fromEntries(detected.languages.map(({language, percentage}) => [language, percentage / 100]));
 
     // Take suggestions into account
@@ -85,6 +104,7 @@ async function detectLanguage({sample, suggested}, provider) {
     });
 
     // {[lang]: 0.0 .. 1.0} map of likeliness the user wants to translate to this language.
+    /** @type {{[lang:String]: Number }} */
     const preferred = (await compat.i18n.getAcceptLanguages()).reduce((preferred, language, i, languages) => {
         // Todo: right now all our models are just two-letter codes instead of BCP-47 :(
         const code = language.substr(0, 2);
@@ -123,6 +143,9 @@ const State = {
 };
 
 class Tab extends EventTarget {
+    /**
+     * @param {Number} id tab id
+     */
     constructor(id) {
         super();
         this.id = id;
@@ -143,8 +166,10 @@ class Tab extends EventTarget {
             recordedPagesURL: undefined
         };
 
+        /** @type {Map<Number,Port>} */
         this.frames = new Map();
 
+        /** @type {{diff:Object,callbackId:Number}|null} */
         this._scheduledUpdateEvent = null;
     }
 
@@ -166,7 +191,7 @@ class Tab extends EventTarget {
         }));
 
         this.frames.forEach(frame => {
-            postMessage({
+            frame.postMessage({
                 command: 'TranslateAbort'
             });
         });
@@ -175,6 +200,7 @@ class Tab extends EventTarget {
     /**
      * Resets the tab state after navigating away from a page. The disconnect
      * of the tab's content scripts will already have triggered abort()
+     * @param {String} url
      */
      reset(url) {
         this.update(state => {
@@ -198,6 +224,15 @@ class Tab extends EventTarget {
         });
     }
 
+    /**
+     * @callback StateUpdatePredicate
+     * @param {Object} state
+     * @return {Object} state
+     */
+
+    /**
+     * @param {StateUpdatePredicate} callback
+     */
     update(callback) {
         const diff = callback(this.state);
         if (diff === undefined)
@@ -240,10 +275,14 @@ function updateActionButton(event) {
     }
 }
 
+/**
+ * A record can be used to record all translation messages send to the
+ * translation backend. Useful for debugging & benchmarking.
+ */
 class Recorder {
     #pages;
 
-    constructor(backing) {
+    constructor() {
         this.#pages = new Map();
     }
 
@@ -256,6 +295,7 @@ class Recorder {
                 texts: [],
             });
 
+        // TODO: we assume everything is HTML or not, `html` is ignored.
         this.#pages.get(url).texts.push(text);
     }
 
@@ -319,6 +359,8 @@ const state = {
     },
     developer: false // should we show the option to record page translation requests?
 };
+
+state.provider = 'translatelocally'; // For testing in Chrome
 
 // State per tab
 const tabs = new Map();

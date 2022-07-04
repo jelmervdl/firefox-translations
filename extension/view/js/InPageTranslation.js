@@ -28,7 +28,7 @@ function removeTextNodes(node) {
                 break;
         }
     });
-``};
+}
 
 // eslint-disable-next-line no-unused-vars
 class InPageTranslation {
@@ -63,7 +63,7 @@ class InPageTranslation {
 
         // Set of elements that have been translated and should not be submitted
         // again unless their contents changed.
-        this.processedNodes = new Set();
+        this.processedNodes = new WeakSet();
 
         // All elements we're actively trying to translate.
         this.targetNodes = new Set();
@@ -74,7 +74,6 @@ class InPageTranslation {
         // Tags that are treated as "meh inline tags just send them to the translator"
         this.inlineTags = new Set([
             "abbr",
-            "a",
             "b",
             "em",
             "i",
@@ -101,7 +100,14 @@ class InPageTranslation {
             "th",
             "td",
             "li",
-            "br"
+            "br",
+        ]);
+
+        // Tags that give no hint about the inline-ness of their contents
+        // because of how they are used in modern web development.
+        this.genericTags = new Set([
+            "a",
+            "span",
         ]);
 
         // Tags that we do not want to translate
@@ -155,21 +161,13 @@ class InPageTranslation {
         ])
 
         this.observer = new MutationObserver(mutationsList => {
-            // Little helper to always submit a full element.
-            const submitElement = (node) => {
-                while (node.nodeType !== Node.ELEMENT_NODE)
-                    node = node.parentNode;
-                
-                this.restartTreeWalker(node);
-            };
-
             for (const mutation of mutationsList) {
                 switch (mutation.type) {
                     case "childList":
-                        mutation.addedNodes.forEach(submitElement);
+                        mutation.addedNodes.forEach(this.restartTreeWalker.bind(this));
                         break;
                     case "characterData":
-                        submitElement(mutation.target);
+                        this.restartTreeWalker(mutation.target);
                         break;
                 }
             }
@@ -257,8 +255,11 @@ class InPageTranslation {
      * elements to enqueue for translation.
      */
     startTreeWalker(root) {
-        console.assert(root.nodeType === Node.ELEMENT_NODE);
-
+        // We're only interested in elements and maybe text. Ignore things like
+        // comments and possibly weird XML instructions.
+        if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.TEXT_NODE)
+            return;
+        
         // If the parent itself is rejected, we don't translate any children.
         // However, if this is a specifically targeted node, we don't do this
         // check. Mainly so we can exclude <head>, but include <title>.
@@ -324,6 +325,9 @@ class InPageTranslation {
     }
 
     isElementInViewport(element) {
+        if (element.nodeType === Node.TEXT_NODE)
+            element = element.parentElement;
+
         const rect = element.getBoundingClientRect();
         return (
             rect.top >= 0 &&
@@ -337,6 +341,9 @@ class InPageTranslation {
      * Test whether the element is visible.
      */
     isElementVisible(element) {
+        if (element.nodeType === Node.TEXT_NODE)
+            element = element.parentElement;
+
         // Based on jQuery (talk about battle-tested...)
         // https://github.com/jquery/jquery/blob/main/src/css/hiddenVisibleSelectors.js
         return !!(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
@@ -372,6 +379,9 @@ class InPageTranslation {
      * split into smaller chunks of HTML for better latency.
      */
     hasInlineContent(node) {
+        if (node.nodeType === Node.TEXT_NODE)
+            return true;
+
         let inlineElements = 0;
         let blockElements = 0;
 
@@ -383,8 +393,9 @@ class InPageTranslation {
                     break;
 
                 case Node.ELEMENT_NODE: // Element
-                    if (this.inlineTags.has(child.nodeName.toLowerCase()) 
-                        || child.nodeName.toLowerCase() == 'span' && this.hasInlineContent(child))
+                    if (this.inlineTags.has(child.nodeName.toLowerCase()))
+                        inlineElements++;
+                    else if (this.genericTags.has(child.nodeName.toLowerCase()) && this.hasInlineContent(child))
                         inlineElements++;
                     else
                         blockElements++;
@@ -405,10 +416,13 @@ class InPageTranslation {
      *   - `<p><b>test</b></p>`: no
      */
     hasTextNodes(node) {
+        if (node.nodeType !== Node.ELEMENT_NODE)
+            return false;
+
         // TODO There is probably a quicker way to do this
         for (let child of node.childNodes) {
             switch (child.nodeType) {
-                case 3: // TextNode
+                case Node.TEXT_NODE: // TextNode
                     if (child.textContent.trim() !== "")
                         return true;
                     break;
@@ -424,6 +438,10 @@ class InPageTranslation {
      * and elements that have a `translate=no` attribute.
      */
     isExcludedNode(node) {
+        // Text nodes are never excluded
+        if (node.nodeType === Node.TEXT_NODE)
+            return false;
+
         // Exclude certain elements
         if (this.excludedTags.has(node.nodeName.toLowerCase()))
             return true;
@@ -449,7 +467,7 @@ class InPageTranslation {
     containsExcludedNode(node) {
         // TODO describe this in terms of the function above, but I assume
         // using querySelector is faster for now.
-        return node.querySelector(this.excludedNodeSelector);
+        return node.nodeType === Node.ELEMENT_NODE && node.querySelector(this.excludedNodeSelector);
     }
 
     /**
@@ -466,6 +484,11 @@ class InPageTranslation {
      *   - FILTER_REJECT: skip this node and everything beneath it.
      */
     validateNode(node) {
+        const mark = (value) => {
+            if (node.nodeType === Node.ELEMENT_NODE)
+                node.setAttribute('x-bergamot-translated', value);
+        };
+
         // Don't resubmit subtrees that are already in progress (unless their
         // contents have been changed
         if (this.queuedNodes.has(node) || this.isParentQueued(node)) {
@@ -475,23 +498,23 @@ class InPageTranslation {
 
         // Exclude nodes that we don't want to translate
         if (this.isExcludedNode(node)) {
-            node.setAttribute('x-bergamot-translated', 'rejected is-excluded-node');
+            mark('rejected is-excluded-node');
             return NodeFilter.FILTER_REJECT;
         }
 
         // Skip over subtrees that don't have text
         if (node.textContent.trim().length === 0) {
-            node.setAttribute('x-bergamot-translated', 'rejected empty-text-content');
+            mark('rejected empty-text-content');
             return NodeFilter.FILTER_REJECT;
         }
             
         if (!this.hasInlineContent(node)) {
-            node.setAttribute('x-bergamot-translated', 'skipped does-not-have-text-of-its-own');
+            mark('skipped does-not-have-text-of-its-own');
             return NodeFilter.FILTER_SKIP; // otherwise dig deeper
         } 
 
         if (this.containsExcludedNode(node) && !this.hasTextNodes(node)) {
-            node.setAttribute('x-bergamot-translated', 'skipped contains-excluded-node');
+            mark('skipped contains-excluded-node');
             return NodeFilter.FILTER_SKIP; // otherwise dig deeper  
         }
         
@@ -521,7 +544,8 @@ class InPageTranslation {
         this.translationsCounter += 1;
 
         // Debugging: mark the node so we can add CSS to see them
-        node.setAttribute('x-bergamot-translated', this.translationsCounter);
+        if (node.nodeType === Node.ELEMENT_NODE)
+            node.setAttribute('x-bergamot-translated', this.translationsCounter);
 
         let priority = 2;
         if (!this.isElementVisible(node))
@@ -543,15 +567,21 @@ class InPageTranslation {
     submitTranslation({priority, id}, node) {
         // Give each element an id that gets passed through the translation so
         // we can later on reunite it.
-        node.querySelectorAll('*').forEach((el, i) => {
-            el.dataset.xBergamotId = i;
-        });
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            node.querySelectorAll('*').forEach((el, i) => {
+                el.dataset.xBergamotId = i;
+            });
+        }
 
-        const text = node.innerHTML;
+        const text = node.nodeType === Node.ELEMENT_NODE ? node.innerHTML : node.textContent;
         if (text.trim().length === 0)
             return;
 
-        this.mediator.translate(text, {priority, id});
+        this.mediator.translate(text, {
+            priority,
+            id,
+            html: node.nodeType === Node.ELEMENT_NODE
+        });
 
         // Keep reference to this node for once we receive a translation response.
         this.pendingTranslations.set(id, node);
@@ -598,17 +628,26 @@ class InPageTranslation {
                 // Remove all live nodes at this branch of the tree, but keep
                 // an (indexed) reference to them since we will be adding them
                 // back, but possibly in a different order.
-                const dstChildNodes = Object.fromEntries(Array.from(dst.childNodes)
-                    .map(child => dst.removeChild(child))
+                const dstNodes = Array.from(dst.childNodes)
+                    .map(child => dst.removeChild(child));
+
+                const dstTextNodes = dstNodes.filter(child => {
+                    if (child.nodeType !== Node.TEXT_NODE)
+                        return false;
+
+                    // because of how bad bergamot-translator is with putting
+                    // whitespace back in the right place, don't reuse these,
+                    // they'll only cause mismatches between textual text nodes.
+                    if (child.data.trim().length == 0)
+                        return false;
+                });
+
+                const dstChildNodes = Object.fromEntries(dstNodes
                     .filter(child => child.nodeType === Node.ELEMENT_NODE)
                     .map(child => [child.dataset.xBergamotId, child]));
 
-                const srcChildNodes = new Set(Array.from(src.childNodes)
-                    .filter(child => child.nodeType === Node.ELEMENT_NODE)
-                    .map(child => child.dataset.xBergamotId));
-
                 // src (translated) dictates the order.
-                Array.from(src.childNodes).forEach(child => {
+                Array.from(src.childNodes).forEach((child, index, siblings) => {
                     // Element nodes we try to use the already existing DOM nodes
                     if (child.nodeType === Node.ELEMENT_NODE) {
                         // Find an element in the live tree that matches the
@@ -642,23 +681,39 @@ class InPageTranslation {
                             // causes: 1) element was duplicated by translation
                             // but then not given text content. This happens on
                             // Wikipedia articles for example.
-                            if (clonedNodes.has(counterpart.dataset.xBergamotId))
-                                removeTextNodes(counterpart);
-
                             // Or 2) the translator messed up and could not
                             // translate the text. This happens on Youtube in the
                             // language selector. In that case, having the original
                             // text is much better than no text at all.
+                            // To make sure it is this case, and not option 2
+                            // we check whether this is the only occurrence.
+                            if (siblings.some((sibling, i) => sibling.nodeType === Node.ELEMENT_NODE && index !== i && child.dataset.xBergamotId === sibling.dataset.xBergamotId))
+                                removeTextNodes(counterpart);
                         }
 
                         // Put the live node back in the live branch. But now
                         // it has been synced with the translated text and order.
                         dst.appendChild(counterpart);
+                    } else if (child.nodeType === Node.TEXT_NODE) {
+                        // Reuse a text node
+                        let counterpart = dstTextNodes.shift();
+
+                        // If no more text nodes were available to reuse, just
+                        // take the child node we'd have copied otherwise.
+                        if (counterpart !== undefined)
+                            counterpart.data = child.data;
+                        else
+                            counterpart = child;
+
+                        dst.appendChild(counterpart);
                     } else {
-                        // All other node types we just copy in directly
+                        // Maybe a comment or something, not particularly interesting
                         dst.appendChild(child);
                     }
                 });
+
+                if (dstTextNodes.length)
+                    console.warn(`[InPageTranslation] ${computePath(src, scratch)} Not all text nodes re-used, left:`, dstTextNodes);
 
                 const lost = Object.values(dstChildNodes)
                     .filter(child => !child.parentNode);
@@ -677,14 +732,34 @@ class InPageTranslation {
             merge(node, scratch.content);
         };
 
+        const updateTextNode = ({id, translated}, node) => {
+            if (translated.trim().length === 0)
+                console.warn('[InPlaceTranslation] text node', node, 'translated to', translated);
+            else
+                node.data = translated;
+        };
+
         // Pause observing mutations
         this.stopMutationObserver();
 
         try {
-            this.translatedNodes.forEach(updateElement);
+            this.translatedNodes.forEach((message, node) => {
+                switch (node.nodeType) {
+                    case Node.TEXT_NODE:
+                        updateTextNode(message, node);
+                        break;
+                    case Node.ELEMENT_NODE:
+                        updateElement(message, node);
+                        break
+                }
+            });
             this.translatedNodes.clear();
             this.updateTimeout = null;
         } finally {
+            // Tell the hijacked mutation observers from MutationObserver.js
+            // to forget about all those DOM changes we just made.
+            window.eval('window.$BergamotResetMutationObservers()');
+            
             this.startMutationObserver();
         }
     }
