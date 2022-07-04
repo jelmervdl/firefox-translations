@@ -1,13 +1,11 @@
 /* global compat */
 importScripts(
     "translation/compat.js",
-    "../3rd_party/pako/pako_inflate.js",
-    "../3rd_party/js-untar/untar.js",
     "translation/func.js",
     "translation/promise.js",
-    "translation/yaml.js",
     "translation/TLTranslationHelper.js",
-    "translation/WASMTranslationHelper.js"
+    "translation/WASMTranslationHelper.js",
+    "translation/WASMTranslationRemote.js"
 );
 
 function isSameDomain(url1, url2) {
@@ -191,6 +189,7 @@ class Tab extends EventTarget {
         }));
 
         this.frames.forEach(frame => {
+            console.log(frame);
             frame.postMessage({
                 command: 'TranslateAbort'
             });
@@ -346,7 +345,7 @@ class Recorder {
 // Supported translation providers
 const providers = {
     'translatelocally': TLTranslationHelper,
-    'wasm': WASMTranslationHelper
+    'wasm': WASMTranslationRemote
 };
 
 // Global state (and defaults)
