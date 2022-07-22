@@ -751,16 +751,18 @@ async function main() {
     });
 
     // Add global "translate this item" menu option
-    chrome.contextMenus.create({
-        id: 'translate-element',
-        title: 'Translate Element',
-        contexts: ['page']
-    });
+    chrome.runtime.onInstalled.addListener(() => {
+        chrome.contextMenus.create({
+            id: 'translate-element',
+            title: 'Translate Element',
+            contexts: ['page']
+        });
 
-    chrome.contextMenus.create({
-        id: 'translate-selection',
-        title: 'Translate Selection',
-        contexts: ['selection']
+        chrome.contextMenus.create({
+            id: 'translate-selection',
+            title: 'Translate Selection',
+            contexts: ['selection']
+        });
     });
 
     chrome.contextMenus.onClicked.addListener((info, tab) => {

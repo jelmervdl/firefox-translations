@@ -101,6 +101,11 @@ let selectionTranslationId = null;
 
 function translate(text, user) {
     console.assert(state.from !== undefined && state.to !== undefined, "state.from or state.to is not set");
+
+    // Reconnect in case the background script was unloaded due to being idle
+    if (!backgroundScript)
+        connectToBackgroundScript();
+
     backgroundScript.postMessage({
         command: "TranslateRequest",
         data: {
