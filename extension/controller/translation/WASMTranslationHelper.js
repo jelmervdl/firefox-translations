@@ -2,50 +2,11 @@
 /* eslint-disable no-native-reassign */
 /* eslint-disable max-lines */
 
-/* global engineRegistryRootURL, engineRegistryRootURLTest, engineRegistry, loadEmscriptenGlueCode, Queue */
-/* global modelRegistryRootURL, modelRegistryRootURLTest, modelRegistry,importScripts */
-
-
 const CACHE_NAME = "bergamot-translations";
 
 const MAX_DOWNLOAD_TIME = 60000; // TODO move this
 
 const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translation/WASMTranslationWorker.js');
-
-/**
- * Little wrapper around the message passing API to keep track of messages and
- * their responses in such a way that you can just wait for them by awaiting
- * the promise returned by `request()`.
- */
-class WorkerChannel {
-    constructor(worker) {
-        this.worker = worker;
-        this.worker.onmessage = this.onmessage.bind(this);
-        this.serial = 0;
-        this.pending = new Map();
-    }
-
-    request(message) {
-        return new Promise((resolve, reject) => {
-            const id = ++this.serial;
-            this.pending.set(id, {resolve, reject});
-            this.worker.postMessage({id, message});
-        })
-    }
-
-    onmessage({data: {id, message, error}}) {
-        if (id === undefined)
-            return;
-
-        const {resolve, reject} = this.pending.get(id);
-        this.pending.delete(id);
-
-        if (error !== undefined)
-            reject(error);
-        else
-            resolve(message); // Note: message can be undefined
-    }
-}
 
 /**
  * Wrapper around bergamot-translator and model management. You only need
@@ -126,20 +87,12 @@ class WorkerChannel {
         worker.postMessage({options: this.options});
 
         // Little wrapper around the message passing api of Worker to make it
-        // easy to await a response to a sent message.
-        const channel = new WorkerChannel(worker);
-
-        // Wrap the worker in a Proxy so you can treat it as if it is an
-        // instance of the TranslationWorker class that lives inside the worker.
-        // All function calls to it are transparently passed through the message
-        // passing channel.
-        return new Proxy(worker, {
-            get(target, name, receiver) {
-                return (...args) => {
-                    return channel.request({name, args: Array.from(args)}) // returns a Promise
-                }
-            }
-        });
+        // easy to await a response to a sent message. This wraps the worker in
+        // a Proxy so you can treat it as if it is an instance of the
+        // TranslationWorker class that lives inside the worker. All function
+        // calls to it are transparently passed through the message passing
+        // channel.
+        return {worker, client: makeClient(worker)};
     }
 
     /**
@@ -375,8 +328,8 @@ class WorkerChannel {
             // No worker free, but space for more?
             if (!worker && this.workers.length < this.workerLimit) {
                 worker = {
-                    idle: true,
-                    worker: this.loadWorker()
+                    ...this.loadWorker(), // adds `worker` and `client`
+                    idle: true
                 };
                 this.workers.push(worker);
             }
@@ -393,7 +346,7 @@ class WorkerChannel {
 
             // Put this worker to work, marking as busy
             worker.idle = false;
-            await this.consumeBatch(batch, worker.worker);
+            await this.consumeBatch(batch, worker.client);
             worker.idle = true;
 
             // Is there more work to be done? Do another idleRequest

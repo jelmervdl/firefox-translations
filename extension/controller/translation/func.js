@@ -70,6 +70,13 @@ function hexToBase64(hexstring) {
     }).join(""));
 }
 
+/**
+ * Turns a port into a proxy object that calls an object on the other side
+ * of the port. All proxied methods return promises. On the other side of the
+ * port use `makeServer()`.
+ * @param {Port | MessagePort} port
+ * @return {{[method:string]: (...any) => Promise<any>}}
+ */
 function makeClient(port) {
     let serial = 0;
 
@@ -84,7 +91,13 @@ function makeClient(port) {
     }
 
     function receive({id, result, error}) {
+        if (!pending.has(id)) {
+            console.debug('Received message with unknown id:', arguments[0]);
+            throw new Error(`Client received response to unknown call '${id}'`);
+        }
+
         const {accept, reject} = pending.get(id);
+
         if (error !== undefined)
             reject(Object.assign(new Error(), error));
         else
@@ -94,7 +107,7 @@ function makeClient(port) {
     if (port.onMessage)
         port.onMessage.addListener(receive);
     else if (port.addEventListener)
-        port.addEventListener('message', receive);
+        port.addEventListener('message', event => receive(event.data));
     else
         throw new TypeError('Unknown port type');
 
@@ -110,14 +123,27 @@ function makeClient(port) {
     });
 }
 
+/**
+ * Exposes all methods of `delegate` to any client made using `makeClient` on
+ * the port.
+ * @param {Port | MessagePort} port
+ * @param {{[method:string]: (...any) => any}} delegate
+ */
 function makeServer(port, delegate) {
-    function receive({id, name, args}) {
+    async function receive({id, name, args}) {
+        if (!id) {
+            console.debug('Message without id:', arguments[0]);
+            throw new Error('Received message without id');
+        }
+
         try {
-            Promise.resolve(Reflect.apply(delegate[name], delegate, args)).then(result => {
-                port.postMessage({id, result});    
-            }).catch(error => {
-                port.postMessage({id, error});
-            });
+            if (typeof delegate[name] !== 'function')
+                throw TypeError(`delegate[${name}] is not a function`);
+
+            // Using `Promise.resolve` to await any promises that delegate[name]
+            // possibly returns.
+            const result = await Promise.resolve(Reflect.apply(delegate[name], delegate, args));
+            port.postMessage({id, result});
         } catch (error) {
             port.postMessage({
                 id,
@@ -133,9 +159,9 @@ function makeServer(port, delegate) {
     }
 
     if (port.onMessage)
-        port.onMessage.addListener(receive)
+        port.onMessage.addListener(receive);
     else if (port.addEventListener)
-        port.addEventListener('message', receive);
+        port.addEventListener('message', event => receive(event.data));
     else
         throw new TypeError('Unknown port type');
 }
