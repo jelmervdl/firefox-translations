@@ -758,7 +758,7 @@ class InPageTranslation {
         } finally {
             // Tell the hijacked mutation observers from MutationObserver.js
             // to forget about all those DOM changes we just made.
-            window.eval('window.$BergamotResetMutationObservers()');
+            // window.eval('window.$BergamotResetMutationObservers()');
             
             this.startMutationObserver();
         }
