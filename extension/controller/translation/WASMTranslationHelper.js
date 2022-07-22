@@ -97,6 +97,20 @@ class WorkerChannel {
     }
 
     /**
+     * Destructor that stops and cleans up.
+     */
+    delete() {
+        // Empty the queue
+        this.remove(() => true);
+
+        // Terminate the workers
+        this.workers.forEach(({worker}) => worker.terminate());
+
+        // Remove any references to data we hold
+        this.buffers.clear();
+    }
+
+    /**
      * Loads a worker thread, and wraps it in a message passing proxy. I.e. it
      * exposes the entire interface of TranslationWorker here, and all calls
      * to it are async. Do note that you can only pass arguments that survive

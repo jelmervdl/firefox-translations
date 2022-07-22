@@ -5,7 +5,6 @@ importScripts(
     "translation/promise.js",
     "translation/TLTranslationHelper.js",
     "translation/WASMTranslationHelper.js",
-    "translation/WASMTranslationRemote.js"
 );
 
 function isSameDomain(url1, url2) {
@@ -142,39 +141,58 @@ const State = {
 
 class Tab extends EventTarget {
     /**
+     * @type {Number}
+     */
+    id;
+
+    /**
+     * @type {Object}
+     */
+    state = {
+        state: State.PAGE_LOADING,
+        from: undefined,
+        to: undefined,
+        models: [],
+        debug: false,
+        error: null,
+        url: null,
+        pendingTranslationRequests: 0,
+        totalTranslationRequests: 0,
+        modelDownloadRead: undefined,
+        modelDownloadSize: undefined,
+        record: false,
+        recordedPagesCount: undefined,
+        recordedPagesURL: undefined
+    };
+
+    /**
+     * @type {Map<Number,Port>}
+     */
+    frames = new Map();
+
+    /**
+     * @type {{diff:Object, callbackId:Number}|null}
+     */
+    _scheduledUpdateEvent = null;
+
+    /**
+     * @type {Promise<Port>}
+     */
+    translator;
+
+    /**
      * @param {Number} id tab id
      */
     constructor(id) {
         super();
         this.id = id;
-        this.state = {
-            state: State.PAGE_LOADING,
-            from: undefined,
-            to: undefined,
-            models: [],
-            debug: false,
-            error: null,
-            url: null,
-            pendingTranslationRequests: 0,
-            totalTranslationRequests: 0,
-            modelDownloadRead: undefined,
-            modelDownloadSize: undefined,
-            record: false,
-            recordedPagesCount: undefined,
-            recordedPagesURL: undefined
-        };
-
-        /** @type {Map<Number,Port>} */
-        this.frames = new Map();
-
-        /** @type {{diff:Object,callbackId:Number}|null} */
-        this._scheduledUpdateEvent = null;
+        this.resetTranslator();
     }
 
     /**
      * Begins translation of the tab
      */
-    translate() {
+    beginTranslation() {
         this.update(state => ({
             state: State.TRANSLATION_IN_PROGRESS
         }));
@@ -183,7 +201,7 @@ class Tab extends EventTarget {
     /**
      * Aborts translation of the tab
      */
-    abort() {
+    abortTranslation() {
         this.update(state => ({
             state: State.TRANSLATION_AVAILABLE
         }));
@@ -221,6 +239,8 @@ class Tab extends EventTarget {
                 };
             }
         });
+
+        this.resetTranslator();
     }
 
     /**
@@ -264,6 +284,34 @@ class Tab extends EventTarget {
         const updateEvent = new Event('update');
         updateEvent.data = diff;
         this.dispatchEvent(updateEvent);
+    }
+
+    resetTranslator() {
+        // TODO: this now assumes we're using tab-specific translator proxies
+        // but we still want to support backgroundScript hosted
+        // TLTranslationHelper based providers, right?
+        this.translator = lazy(() => {
+            return new Promise((accept, reject) => {
+                this.frames.get(0).postMessage({
+                    command: 'SetupTranslatorRequest',
+                    data: {
+                        options: state.options
+                    }
+                });
+
+                this._translatorPromise = {accept, reject};
+            });
+        });
+    }
+
+    setTranslator(port) {
+        port.onDisconnect.addListener(this.resetTranslator.bind(this));
+        this._translatorPromise.accept(makeClient(port));
+    }
+
+    async translate(request) {
+        const client = await this.translator;
+        return await client.translate(request);
     }
 }
 
@@ -353,7 +401,7 @@ class Recorder {
 // Supported translation providers
 const providers = {
     'translatelocally': TLTranslationHelper,
-    'wasm': WASMTranslationRemote
+    'wasm': WASMTranslationHelper
 };
 
 // Global state (and defaults)
@@ -366,8 +414,6 @@ const state = {
     },
     developer: false // should we show the option to record page translation requests?
 };
-
-state.provider = 'translatelocally'; // For testing in Chrome
 
 // State per tab
 /** @type {Promise<Tab>} */
@@ -554,7 +600,7 @@ async function connectContentScript(contentScript) {
                     }));
                 }
 
-                provider.get().translate({...message.data, _abortSignal})
+                tab.translate({...message.data, _abortSignal})
                     .then(response => {
                         if (!response.request._abortSignal.aborted) {
                             contentScript.postMessage({
@@ -625,7 +671,7 @@ async function connectPopup(popup) {
                 try {
                     await Promise.all(downloads.keys());
 
-                    tab.translate();
+                    tab.beginTranslation();
                 } catch (e) {
                     tab.update(state => ({
                         state: State.TRANSLATION_ERROR,
@@ -634,11 +680,11 @@ async function connectPopup(popup) {
                 }
                 break;
             case "TranslateStart":
-                tab.translate();
+                tab.beginTranslation();
                 break;
             
             case 'TranslateAbort':
-                tab.abort();
+                tab.abortTranslation();
                 break;
 
             case 'ExportRecordedPages':
@@ -654,6 +700,12 @@ async function connectPopup(popup) {
                 break;
         }
     });
+}
+
+async function connectTranslator(port) {
+    const tabId = port.sender.tab.id;
+    const tab = await getTab(tabId);
+    tab.setTranslator(port);
 }
 
 async function main() {
@@ -675,6 +727,8 @@ async function main() {
             connectContentScript(port);
         else if (port.name.startsWith('popup-'))
             connectPopup(port);
+        else if (port.name === 'translator-proxy')
+            connectTranslator(port);
     });
 
     // Initialize or update the state of a tab when navigating

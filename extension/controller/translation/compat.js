@@ -18,23 +18,23 @@ function promisify(object, methods) {
 
 const compat = new class {
 	#isFirefox = false;
-	#isChromium = false;
+	#isChromiumV2 = false;
 	#runtime;
 
 	constructor() {
 		if (typeof browser !== 'undefined') {
-			this.#isFirefox = true;
 			this.#runtime = browser;
+			this.#isFirefox = true;
 		} else if (typeof chrome !== 'undefined') {
-			this.#isChromium = true;
 			this.#runtime = chrome;
+			this.#isChromiumV2 = chrome.runtime.getManifest().manifest_version === 2;
 		} else {
 			throw new NotImplementedError();
 		}
 	}
 
 	get storage() {
-		if (this.#isChromium)
+		if (this.#isChromiumV2)
 			return new Proxy(chrome.storage, {
 				get(target, prop, receiver) {
 					if (['sync', 'local', 'managed'].includes(prop))
@@ -56,20 +56,23 @@ const compat = new class {
 	}
 
 	get tabs() {
-		if (this.#isChromium)
+		if (this.#isChromiumV2)
 			return promisify(chrome.tabs, ['query']);
 		else
 			return this.#runtime.tabs;
 	}
 
 	get i18n() {
-		if (this.#isChromium)
+		if (this.#isChromiumV2)
 			return promisify(chrome.i18n, ['detectLanguage', 'getAcceptLanguages']);
 		else
 			return this.#runtime.i18n;
 	}
 
-	get browserAction() {
-		return this.#runtime.browserAction;
+	get action() {
+		if (this.#isFirefox || this.#isChromiumV2)
+			return this.#runtime.browserAction;
+		else
+			return this.#runtime.action;
 	}
 };

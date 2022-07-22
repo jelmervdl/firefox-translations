@@ -74,6 +74,25 @@ on('Update', diff => {
     }
 });
 
+on('SetupTranslatorRequest', ({options}) => {
+    const frame = document.createElement('iframe');
+    frame.src = chrome.runtime.getURL('controller/translatorProxy.html');
+    frame.style.cssText = 'position:fixed!important;' +
+                          'top:-99px!important;' +
+                          'left:-99px!important;' +
+                          'width:2px!important;' +
+                          'height:2px!important;' +
+                          'border:0!important';
+
+    // Pass on the translator options once the frame is loaded
+    frame.onload = () => {
+        console.log('translator proxy frame loaded', frame.contentWindow);
+        frame.contentWindow.postMessage({options}, `chrome-extension://${chrome.runtime.id}`);
+    }
+
+    (document.body || document.documentElement).appendChild(frame);
+});
+
 const sessionID = new Date().getTime();
 
 // Used to track the last text selection translation request, so we don't show

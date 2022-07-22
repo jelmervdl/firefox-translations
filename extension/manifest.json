@@ -50,6 +50,17 @@
 			"all_frames": true
 		}
 	],
+	"web_accessible_resources": [
+		{
+			"resources": [
+				"controller/translatorProxy.html"
+			],
+			"matches": [
+				"<all_urls>"
+			],
+			"use_dynamic_url": false
+		}
+	],
 	"incognito": "spanning",
 	"action":
 	{

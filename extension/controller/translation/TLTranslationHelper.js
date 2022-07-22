@@ -65,18 +65,16 @@ class PortChannel {
         // a map of language-pairs to a list of models you need for it: Map<{from:str,to:str}, Promise<List<{from:str,to:str}>>>
         this.models = new Map();
 
-        // List of active workers (and a flag to mark them idle or not)
-        this.workers = [];
-
-        // List of batches we push() to & shift() from
-        this.queue = [];
-
-        // batch serial to help keep track of batches when debugging
-        this.batchSerial = 0;
-
         // Error handler for all errors that are async, not tied to a specific
         // call and that are unrecoverable.
         this.onerror = err => console.error('TranslateLocally error:', err);
+    }
+
+    delete() {
+        // If we did start the client, disconnect it.
+        if (this.client.resolved)
+            this.client.then(client => client.disconnect());
+
     }
 
     async loadNativeClient() {
