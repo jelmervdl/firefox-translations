@@ -249,6 +249,14 @@ class Tab extends EventTarget {
         }
     }
 
+    delete() {
+        // Remove state from storage
+        compat.storage.session.remove(`tab.${this.id}`);
+
+        // Remove state from now
+        tabs.delete(this.id);
+    }
+
     _dispatchUpdateEvent() {
         const {diff} = this._scheduledUpdateEvent;
         this._scheduledUpdateEvent = null;
@@ -362,13 +370,35 @@ const state = {
 state.provider = 'translatelocally'; // For testing in Chrome
 
 // State per tab
+/** @type {Promise<Tab>} */
 const tabs = new Map();
 
+/**
+ * @param {Number} tabId
+ * @return {Promise<Tab>}
+ */
 function getTab(tabId) {
     if (!tabs.has(tabId)) {
-        const tab = new Tab(tabId);
-        tabs.set(tabId, tab);
-        tab.addEventListener('update', updateActionButton);
+        tabs.set(tabId, new Promise(async (accept, reject) => {
+            try {
+                const tab = new Tab(tabId);
+
+                // (possibly) restore state
+                const key = `tab.${tabId}`;
+                Object.assign(tab.state, await compat.storage.session.get(key));
+
+                // Save state on change
+                tab.addEventListener('update', e => {
+                    compat.storage.session.set({[key]: tab.state});
+                });
+
+                // tab.addEventListener('update', updateActionButton);
+
+                accept(tab);
+            } catch (e) {
+                reject(e);
+            }
+        }));
     }
 
     return tabs.get(tabId);
@@ -448,8 +478,8 @@ function connectTab(tab, port) {
     });
 }
 
-function connectContentScript(contentScript) {
-    const tab = getTab(contentScript.sender.tab.id);
+async function connectContentScript(contentScript) {
+    const tab = await getTab(contentScript.sender.tab.id);
 
     // Register this content script with the tab
     tab.frames.set(contentScript.sender.frameId, contentScript);
@@ -560,10 +590,10 @@ function connectContentScript(contentScript) {
     });
 }
 
-function connectPopup(popup) {
+async function connectPopup(popup) {
     const tabId = parseInt(popup.name.substr('popup-'.length));
 
-    const tab = getTab(tabId);
+    const tab = await getTab(tabId);
 
     // Make the popup receive state updates
     connectTab(tab, popup);
@@ -654,16 +684,16 @@ async function main() {
             return;
 
         // Todo: treat reload and link different? Reload -> disable translation?
-        getTab(tabId).reset(url);
+        getTab(tabId).then(tab => tab.reset(url));
     });
 
     compat.tabs.onCreated.addListener(({id: tabId}) => {
-        getTab(tabId).reset();
+        getTab(tabId).then(tab => tab.reset());
     });
 
     // Remove the tab state if a tab is removed
     compat.tabs.onRemoved.addListener(({tabId}) => {
-        tabs.delete(tabId);
+        getTab(tabId).then(tab => tab.delete());
     });
 
     // Add global "translate this item" menu option
@@ -682,13 +712,17 @@ async function main() {
     chrome.contextMenus.onClicked.addListener((info, tab) => {
         switch (info.menuItemId) {
             case 'translate-element':
-                getTab(tab.id).frames.get(info.frameId).postMessage({
-                    command: 'TranslateClickedElement'
+                getTab(tab.id).then(({frames}) => {
+                    frames.get(info.frameId).postMessage({
+                        command: 'TranslateClickedElement'
+                    })
                 });
                 break;
             case 'translate-selection':
-                getTab(tab.id).frames.get(info.frameId).postMessage({
-                    command: 'TranslateSelection'
+                getTab(tab.id).then(({frames}) => {
+                    frames.get(info.frameId).postMessage({
+                        command: 'TranslateSelection'
+                    });
                 });
                 break;
         }
