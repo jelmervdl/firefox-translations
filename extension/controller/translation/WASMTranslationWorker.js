@@ -68,25 +68,33 @@ class WASMTranslationWorker {
      */
     loadModule() {
         return new Promise(async (resolve, reject) => {
-            const response = await fetch('bergamot-translator-worker.wasm');
+            try {
+                const response = await fetch('bergamot-translator-worker.wasm');
 
-            Object.assign(Module, {
-                instantiateWasm: (info, accept) => {
-                    WebAssembly.instantiateStreaming(response, {
-                        ...info,
-                        'wasm_gemm': this.options.useNativeIntGemm
-                            ? this.linkNativeIntGemm(info)
-                            : this.linkFallbackIntGemm(info)
-                    }).then(({instance}) => accept(instance));
-                    return {};
-                },
-                onRuntimeInitialized: () => {
-                    resolve(Module);
-                }
-            });
+                Object.assign(Module, {
+                    instantiateWasm: (info, accept) => {
+                        try {
+                            WebAssembly.instantiateStreaming(response, {
+                                ...info,
+                                'wasm_gemm': this.options.useNativeIntGemm
+                                    ? this.linkNativeIntGemm(info)
+                                    : this.linkFallbackIntGemm(info)
+                            }).then(({instance}) => accept(instance)).catch(reject);
+                        } catch (err) {
+                            reject(err);
+                        }
+                        return {};
+                    },
+                    onRuntimeInitialized: () => {
+                        resolve(Module);
+                    }
+                });
 
-            // Emscripten glue code
-            importScripts('bergamot-translator-worker.js');
+                // Emscripten glue code
+                importScripts('bergamot-translator-worker.js');
+            } catch (err) {
+                reject(err);
+            }
         });
     }
 
@@ -218,6 +226,7 @@ class WASMTranslationWorker {
         return translations;
     }
 }
+
 
 onmessage = ({data}) => {
     if (!data.options){

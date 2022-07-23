@@ -2,6 +2,15 @@
 /* eslint-disable no-native-reassign */
 /* eslint-disable max-lines */
 
+/**
+ * @typedef {Object} TranslationRequest
+ * @property {String} from
+ * @property {String} to
+ * @property {String} text
+ * @property {Boolean} html
+ * @property {Integer?} priority
+ */
+
 const CACHE_NAME = "bergamot-translations";
 
 const MAX_DOWNLOAD_TIME = 60000; // TODO move this
@@ -16,44 +25,85 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
  class WASMTranslationHelper {
     
     /**
-     * options:
-     *   cacheSize: 0
-     *   useNativeIntGemm: false
-     *   workers: 1
-     *   batchSize: 8
+     * @param {{
+     *  cacheSize: Number?,
+     *  useNativeIntGemm: Boolean?,
+     *  workers: Number?,
+     *  batchSize: Number?
+     * }} options
      */
     constructor(options) {
         this.options = options || {};
 
         // registry of all available models and their urls: Promise<List<Model>>
-        this.registry = lazy(this.loadModelRegistery.bind(this));
+        this.registry = lazy(async () => {
+            try {
+                return await this.loadModelRegistery();
+            } catch (error) {
+                throw new Error(`Could not download model registry: ${error.message}`);
+            }
+        });
 
-        // Map<{from:str,to:str}, Promise<Map<name:str,buffer:ArrayBuffer>>>
+        /**
+         * Map of downloaded model data files as buffers per model.
+         * @type {Map<{from:String,to:String}, Promise<Map<String,ArrayBuffer>>>}
+         */
         this.buffers = new Map();
         
-        // a map of language-pairs to a list of models you need for it: Map<{from:str,to:str}, Promise<List<{from:str,to:str}>>>
+        /**
+         * A map of language-pairs to a list of models you need for it.
+         * @type {Map<{from:String,to:String}, Promise<{from:String,to:String}[]>>}
+         */
         this.models = new Map();
 
-        // List of active workers (and a flag to mark them idle or not)
+        /**
+         * @type {Array<{idle:Boolean, worker:Proxy}>} List of active workers
+         * (and a flag to mark them idle or not)
+         */
         this.workers = [];
 
-        // Maximum number of workers
+        /**
+         * Maximum number of workers
+         * @type {Number} 
+         */
         this.workerLimit = Math.max(this.options.workers || 0, 1);
 
-        // List of batches we push() to & shift() from
+        /**
+         * List of batches we push() to & shift() from using `enqueue`.
+         * @type {{
+         *    id: Number,
+         *    key: String,
+         *    priority: Number,
+         *    models: TranslationModel[],
+         *    requests: Array<{
+         *      request: TranslationRequest,
+         *      resolve: (response: TranslationResponse),
+         *      reject: (error: Error)
+         *    }>
+         * }}
+         */
         this.queue = [];
 
-        // batch serial to help keep track of batches when debugging
+        /**
+         * batch serial to help keep track of batches when debugging
+         * @type {Number}
+         */
         this.batchSerial = 0;
 
-        // Number of requests in a batch before it is ready to be translated in
-        // a single call. Bigger is better for throughput (better matrix packing)
-        // but worse for latency since you'll have to wait for the entire batch
-        // to be translated.
+        /**
+         * Number of requests in a batch before it is ready to be translated in
+         * a single call. Bigger is better for throughput (better matrix packing)
+         * but worse for latency since you'll have to wait for the entire batch
+         * to be translated.
+         * @type {Number}
+         */
         this.batchSize = Math.max(this.options.batchSize || 8, 1);
 
-        // Error handler for all errors that are async, not tied to a specific
-        // call and that are unrecoverable.
+        /**
+         * Error handler for all errors that are async, not tied to a specific
+         * call and that are unrecoverable.
+         * @type {(error: Error)}
+         */
         this.onerror = err => console.error('WASM Translation Worker error:', err);
     }
 
@@ -148,26 +198,30 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
         entries.sort(({model: a}, {model: b}) => (a.shortName.indexOf('tiny') === -1 ? 1 : 0) - (b.shortName.indexOf('tiny') === -1 ? 1 : 0));
 
         if (!entries)
-            throw new Error(`No model for ${from} -> ${to}`);
+            throw new Error(`No model for '${from}' -> '${to}'`);
 
         const entry = first(entries).model;
 
-        const compressedArchive = await this.getItemFromCacheOrWeb(entry.url, undefined, entry.checksum);
+        const compressedArchive = await this.getItemFromCacheOrWeb(entry.url, entry.checksum);
 
         const archive = pako.inflate(compressedArchive);
 
         const files = await untar(archive.buffer);
 
-        // Find the config yml file
-        const configFile = files.find(file => file.name.endsWith('config.intgemm8bitalpha.yml'));
+        const find = (filename) => {
+            const found = files.find(file => file.name.match(/(?:^|\/)([^\/]+)$/)[1] === filename)
+            if (found === undefined)
+                throw new Error(`Could not find '${filename}' in model archive`);
+            return found;
+        };
 
-        const config = YAML.parse(configFile.readAsString());
+        const config = YAML.parse(find('config.intgemm8bitalpha.yml').readAsString());
 
-        const model = files.find(file => file.name.endsWith(config.models[0])).buffer;
+        const model = find(config.models[0]).buffer;
 
-        const vocabs = config.vocabs.map(vocab => files.find(file => file.name.endsWith(vocab)).buffer);
+        const vocabs = config.vocabs.map(vocab => find(vocab).buffer);
 
-        const shortlist = files.find(file => file.name.endsWith(config.shortlist[0])).buffer;
+        const shortlist = find(config.shortlist[0]).buffer;
 
         performance.measure('loadTranslationModel', `loadTranslationModule.${JSON.stringify({from, to})}`);
 
@@ -177,34 +231,41 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
 
     /**
      * Helper to either get a URL remote or from cache. Downloaded file is
-     * always checked against checksum. Returns Promise<ArrayBuffer>.
+     * always checked against checksum.
+     * @param {String} url
+     * @param {String} checksum sha256 checksum as hexadecimal string
+     * @returns {Promise<ArrayBuffer>}
      */
-    async getItemFromCacheOrWeb(url, size, checksum) {
-        const cache = await caches.open(CACHE_NAME);
-        const match = await cache.match(url);
+    async getItemFromCacheOrWeb(url, checksum) {
+        try {
+            const cache = await caches.open(CACHE_NAME);
+            const match = await cache.match(url);
 
-        // It's not already in the cache? Then return the downloaded version
-        // (but also put it in the cache)
-        if (!match)
-            return this.getItemFromWeb(url, size, checksum, cache);
+            if (match) {
+                // Found it in the cache, let's check whether it (still) matches the
+                // checksum. If not, redownload it.
+                const buffer = await match.arrayBuffer();
+                if (await this.digestSha256AsHex(buffer) === checksum)
+                    return buffer;
+                else
+                    cache.delete(url);
+            }
 
-        // Found it in the cache, let's check whether it (still) matches the
-        // checksum.
-        const buffer = await match.arrayBuffer();
-        if (await this.digestSha256AsHex(buffer) !== checksum) {
-            cache.delete(url);
-            throw new Error("Error downloading translation engine. (checksum)")
+            return await this.getItemFromWeb(url, checksum, cache);
+        } catch (e) {
+            throw new Error(`Failed to download '${url}': ${e.message}`);
         }
-
-        return buffer;
     }
 
     /**
      * Helper to download file from the web (and store it in the cache if that
      * is passed in as well). Verifies the checksum.
-     * Returns Promise<ArrayBuffer>.
+     * @param {String} url
+     * @param {String} checksum sha256 checksum as hexadecimal string
+     * @param {Cache?} cache optional cache to save response into
+     * @returns {Promise<ArrayBuffer>}
      */
-    async getItemFromWeb(url, size, checksum, cache) {
+    async getItemFromWeb(url, checksum, cache) {
         try {
             // Rig up a timeout cancel signal for our fetch
             const abort = new AbortController();
@@ -239,6 +300,8 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
 
     /**
      * Expects ArrayBuffer, returns String.
+     * @param {ArrayBuffer} buffer
+     * @returns {Promise<String>} SHA256 checksum as hexadecimal string
      */
     async digestSha256AsHex(buffer) {
         // hash the message
@@ -262,6 +325,9 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
      *   [TranslationWorker].loadTranslationModel({from,to}, buffers)
      * });
      * ```
+     * @param {String} from
+     * @param {String} to
+     * @returns {Promise<TranslationModel[]>}
      */
     getModels(from, to) {
         const key = JSON.stringify({from, to});
@@ -271,12 +337,18 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
         // return the same promise, and the actual lookup is only done once.
         // The lookup is async because we need to await `this.registry`
         if (!this.models.has(key))
-            this.models.set(key, this.loadModels(from, to));
+            this.models.set(key, this.findModels(from, to));
 
         return this.models.get(key);
     }
 
-    async loadModels(from, to) {
+    /**
+     * Find model (or model pair) to translate from `from` to `to`.
+     * @param {String} from
+     * @param {String} to
+     * @returns {Promise<TranslationModel[]>}
+     */
+    async findModels(from, to) {
         const registry = await this.registry;
 
         // TODO: This all scales really badly.
@@ -302,7 +374,7 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
         );
 
         if (!shared.size)
-            throw new Error(`No model available to translate from ${from} to ${to}`);
+            throw new Error(`No model available to translate from '${from}' to '${to}'`);
 
         return [
             outbound.find(model => shared.has(model.to)),
@@ -327,11 +399,15 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
 
             // No worker free, but space for more?
             if (!worker && this.workers.length < this.workerLimit) {
-                worker = {
-                    ...this.loadWorker(), // adds `worker` and `client`
-                    idle: true
-                };
-                this.workers.push(worker);
+                try {
+                    worker = {
+                        ...this.loadWorker(), // adds `worker` and `client`
+                        idle: true
+                    };
+                    this.workers.push(worker);
+                } catch (e) {
+                    this.onerror(new Error(`Could not initialise translation worker: ${e.message}`));
+                }
             }
 
             // If no worker, that's the end of it.
@@ -346,7 +422,11 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
 
             // Put this worker to work, marking as busy
             worker.idle = false;
-            await this.consumeBatch(batch, worker.client);
+            try {
+                await this.consumeBatch(batch, worker.client);
+            } catch (e) {
+                batch.requests.forEach(({reject}) => reject(e));
+            }
             worker.idle = true;
 
             // Is there more work to be done? Do another idleRequest
@@ -366,24 +446,30 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
      *   priority: 0 // optional, like `nice` lower numbers are translated first
      * })
      * ```
+     * @param {TranslationRequest} request
+     * @returns {Promise<TranslationResponse>}
      */
     translate(request) {
         const {from, to, html, priority} = request;
 
         return new Promise(async (resolve, reject) => {
-            // Batching key: only requests with the same key can be batched
-            // together. Think same translation model, same options.
-            const key = JSON.stringify({from, to});
+            try {
+                // Batching key: only requests with the same key can be batched
+                // together. Think same translation model, same options.
+                const key = JSON.stringify({from, to});
 
-            // (Fetching models first because if we would do it between looking
-            // for a batch and making a new one, we end up with a race condition.)
-            const models = await this.getModels(from, to);
-            
-            // Put the request and its callbacks into a fitting batch
-            this.enqueue({key, models, request, resolve, reject, priority});
+                // (Fetching models first because if we would do it between looking
+                // for a batch and making a new one, we end up with a race condition.)
+                const models = await this.getModels(from, to);
+                
+                // Put the request and its callbacks into a fitting batch
+                this.enqueue({key, models, request, resolve, reject, priority});
 
-            // Tell a worker to pick up the work at some point.
-            this.notify();
+                // Tell a worker to pick up the work at some point.
+                this.notify();
+            } catch (e) {
+                reject(e);
+            }
         });
     }
 
@@ -391,6 +477,7 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
      * Prune pending requests by testing each one of them to whether they're
      * still relevant. Used to prune translation requests from tabs that got
      * closed.
+     * @param {(request:TranslationRequest) => boolean} filter evaluates to true if request should be removed
      */
     remove(filter) {
         const queue = this.queue;
@@ -423,6 +510,7 @@ const WASM_TRANSLATION_WORKER_URL = compat.runtime.getURL('controller/translatio
      * Internal function used to put a request in a batch that still has space.
      * Also responsible for keeping the batches in order of priority. Called by
      * `translate()` but also used when filtering pending requests.
+     * @param {{request:TranslateRequest, models:TranslationModel[], key:String, priority:Number?, resolve:(TranslateResponse)=>any, reject:(Error)=>any}}
      */
     enqueue({key, models, request, resolve, reject, priority}) {
         if (priority === undefined)

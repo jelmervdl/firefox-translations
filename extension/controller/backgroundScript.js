@@ -131,6 +131,7 @@ async function detectLanguage({sample, suggested}, provider) {
 const State = {
     PAGE_LOADING: 'page-loading',
     PAGE_LOADED: 'page-loaded',
+    PAGE_ERROR: 'page-error',
     TRANSLATION_NOT_AVAILABLE: 'translation-not-available',
     TRANSLATION_AVAILABLE: 'translation-available',
     DOWNLOADING_MODELS: 'downloading-models',
@@ -235,7 +236,8 @@ class Tab extends EventTarget {
                                  // language. We leave to selected as is
                     pendingTranslationRequests: 0,
                     totalTranslationRequests: 0,
-                    state: State.PAGE_LOADING
+                    state: State.PAGE_LOADING,
+                    error: null
                 };
             }
         });
@@ -468,6 +470,11 @@ let provider = new class {
         this.#provider.onerror = err => {
             console.error('Translation provider error:', err);
 
+            tabs.forEach(tab => tab.update(() => ({
+                state: State.PAGE_ERROR,
+                error: `Translation provider error: ${err.message}`,
+            })));
+
             // Try falling back to WASM is the current provider doesn't work
             // out. Might lose some translations the process but
             // InPageTranslation should be able to deal with that.
@@ -580,6 +587,11 @@ async function connectContentScript(contentScript) {
                             ? State.TRANSLATION_AVAILABLE
                             : State.TRANSLATION_NOT_AVAILABLE
                     }));
+                }).catch(error => {
+                    tab.update(state => ({
+                        state: State.PAGE_ERROR,
+                        error
+                    }));
                 });
                 break;
 
@@ -614,8 +626,10 @@ async function connectContentScript(contentScript) {
                         if (e && e.message && e.message === 'removed by filter' && e.request && e.request._abortSignal.aborted)
                             return;
                         
-                        // rethrow any other error
-                        throw e;
+                        tab.update(state => ({
+                            state: State.TRANSLATION_ERROR,
+                            error: e.message
+                        }));
                     })
                     .finally(() => {
                         tab.update(state => ({
