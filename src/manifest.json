@@ -1,8 +1,7 @@
 {
 	"manifest_version": 2,
-	"name": "TranslateLocally for Firefox",
-	"version": "0.0.1",
-	"version_name": "development",
+	"name": "TranslateLocally for Thunderbird",
+	"version": "0.7.1",
 	"browser_specific_settings":
 	{
 		"gecko":
@@ -13,12 +12,11 @@
 	},
 	"permissions":
 	[
-		"<all_urls>",
-		"contextMenus",
-		"tabs",
-		"webNavigation",
+		"messagesModify",
+		"menus",
 		"storage",
-		"nativeMessaging"
+		"https://translatelocally.com/models.json",
+		"https://data.statmt.org/bergamot/"
 	],
 	"background":
 	{
@@ -38,8 +36,7 @@
 			"all_frames": true
 		}
 	],
-	"incognito": "spanning",
-	"browser_action":
+	"message_display_action":
 	{
 		"browser_style": true,
 		"default_icon":

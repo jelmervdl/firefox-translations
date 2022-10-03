@@ -60,7 +60,16 @@ async function detectLanguage({sample, suggested}, provider) {
         throw new Error('Empty sample');
 
     const [detected, models] = await Promise.all([
-        compat.i18n.detectLanguage(sample),
+        // compat.i18n.detectLanguage(sample),
+        // TODO: detectLanguage is not available? Switch to Fasttext?
+        Promise.resolve({
+            languages: [
+                {
+                    language: 'de',
+                    percentage: 100
+                }
+            ]
+        }),
         provider.registry
     ]);
 
@@ -511,7 +520,7 @@ function connectContentScript(contentScript) {
                 }).catch(error => {
                     tab.update(state => ({
                         state: State.PAGE_ERROR,
-                        error
+                        error: error.message
                     }));
                 });
                 break;
@@ -661,27 +670,19 @@ async function main() {
             connectPopup(port);
     });
 
-    // Initialize or update the state of a tab when navigating
-    compat.webNavigation.onCommitted.addListener(({tabId, frameId, url}) => {
-        // Right now we're only interested in top-level navigation changes
-        if (frameId !== 0)
-            return;
-
-        // Todo: treat reload and link different? Reload -> disable translation?
-        getTab(tabId).reset(url);
-    });
-
-    compat.tabs.onCreated.addListener(({id: tabId}) => {
-        getTab(tabId).reset();
-    });
-
-    // Remove the tab state if a tab is removed
-    compat.tabs.onRemoved.addListener(({tabId}) => {
-        tabs.delete(tabId);
+    chrome.messageDisplayScripts.register({
+        "js": [
+            {"file": "content-script.js"}
+        ],
+        "css": [
+            {"file": "SelectionTranslation.css"},
+            {"file": "InPageTranslation.css"}
+        ]
     });
 
     // Add "translate selection" menu item
-    chrome.contextMenus.create({
+    /*
+    browser.menus.create({
         id: 'translate-selection',
         title: 'Translate Selection',
         contexts: ['selection']
@@ -696,6 +697,7 @@ async function main() {
                 break;
         }
     })
+    */
 
     Object.assign(self, {
         tabs,
