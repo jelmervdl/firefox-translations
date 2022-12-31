@@ -273,6 +273,10 @@ export default class InPageTranslation {
         });
 
         this.isParentQueuedCache = new Map();
+
+        // Bound mouse listener so multiple addEventListener calls don't
+        // register multiple copies, and removeEventListener can be used.
+        this.onMouseEnterCallback = this.onMouseEnter.bind(this); 
     }
 
     /**
@@ -411,6 +415,9 @@ export default class InPageTranslation {
     }
 
     restoreElement(node) {
+        // Remove the [mouseenter] event listener
+        node.removeEventListener('mouseenter', this.onMouseEnterCallback);
+
         const original = this.originalContent.get(node);
 
         // We start tracking a node in enqueueTranslation. If it isn't tracked
@@ -1060,6 +1067,8 @@ export default class InPageTranslation {
             };
 
             merge(node, scratch.body);
+
+            node.addEventListener('mouseenter', this.onMouseEnterCallback);
         };
 
         const updateTextNode = ({id, translated}, node) => {
@@ -1147,5 +1156,57 @@ export default class InPageTranslation {
         // Intentionally not testing for en === en-US to make sure very
         // specific models are not used for translating broad language codes.
         return false;
+    }
+
+    cloneOriginal(node) {
+        switch (node.nodeType) {
+            case Node.TEXT_NODE: {
+                const original = this.originalContent.get(node);
+                console.log('Restored text', node, 'to', original);
+                return document.createTextNode(original !== undefined ? original : node.data);
+            }
+            case Node.ELEMENT_NODE: {
+                const original = this.originalContent.get(node);
+                if (original === undefined)
+                    return node.cloneNode(true);
+                const content = node.cloneNode(false);
+                original.forEach(node => {
+                    const restored = this.cloneOriginal(node);
+                    console.log('Restored', node, 'to', restored);
+                    content.appendChild(restored);
+                });
+                return content;
+            }
+        }
+    }
+
+    onMouseEnter(evt) {
+        const original = this.cloneOriginal(evt.target);
+
+        const popup = document.createElement('div');
+        popup.appendChild(original);
+
+        const rect = evt.target.getBoundingClientRect();
+        Object.assign(popup.style, {
+            position: 'absolute',
+            pointerEvents: 'none',
+            background: 'white',
+            color: 'black',
+            zIndex: '2147483646',
+            top: `${rect.bottom + (document.documentElement.scrollTop || document.body.scrollTop)}px`,
+            left: `${rect.left + (document.documentElement.scrollLeft || document.body.scrollLeft)}px`,
+            width: `${rect.width}px`,
+            // height: `${rect.height}px`
+        });
+
+        const root = document.createElement('div');
+        root.translate = false;
+
+        const remove = e => document.body.removeChild(root);
+        evt.target.addEventListener('mouseleave', remove);
+ 
+        const dom = root.attachShadow({mode: 'closed'});
+        dom.appendChild(popup);
+        document.body.appendChild(root);
     }
 }
