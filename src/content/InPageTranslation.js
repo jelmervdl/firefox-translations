@@ -1,5 +1,6 @@
 import "./InPageTranslation.css";
-import { isElementVisible, isElementInViewport } from '../shared/common.js'; 
+import compat from "../shared/compat.js";
+import { isElementVisible, isElementInViewport } from "../shared/common.js";
 
 function computePath(node, root) {
     if (root === undefined)
@@ -29,6 +30,21 @@ function removeTextNodes(node) {
                 break;
         }
     });
+}
+
+function once(target, name, callback, options) {
+    const wrapper = (evt) => {
+        try {
+            callback(evt);
+        } finally {
+            remove()
+        }
+    };
+    var remove = () => { /* `var` because hoisted so `wrapper` can use it */
+        target.removeEventListener(name, wrapper, options);
+    };
+    target.addEventListener(name, wrapper, options);
+    return remove;
 }
 
 /**
@@ -1159,20 +1175,29 @@ export default class InPageTranslation {
     }
 
     cloneOriginal(node) {
+        const mapping = {
+            'em': 'em',
+            'i': 'em',
+            'u': 'u',
+            'sup': 'sup',
+            'sub': 'sub',
+            'ins': 'ins',
+            'del': 'del'
+        };
+
         switch (node.nodeType) {
             case Node.TEXT_NODE: {
                 const original = this.originalContent.get(node);
-                console.log('Restored text', node, 'to', original);
                 return document.createTextNode(original !== undefined ? original : node.data);
             }
             case Node.ELEMENT_NODE: {
                 const original = this.originalContent.get(node);
                 if (original === undefined)
-                    return node.cloneNode(true);
-                const content = node.cloneNode(false);
+                    return document.createDocumentFragment(); // empty
+                
+                const content = document.createElement(mapping[node.tagName.toLowerCase()] || 'span');
                 original.forEach(node => {
                     const restored = this.cloneOriginal(node);
-                    console.log('Restored', node, 'to', restored);
                     content.appendChild(restored);
                 });
                 return content;
@@ -1181,32 +1206,40 @@ export default class InPageTranslation {
     }
 
     onMouseEnter(evt) {
-        const original = this.cloneOriginal(evt.target);
+        const render = () => {
+            const original = this.cloneOriginal(evt.target);
 
-        const popup = document.createElement('div');
-        popup.appendChild(original);
+            const popup = document.createElement('div');
+            popup.classList.add('popup');
+            popup.appendChild(original);
 
-        const rect = evt.target.getBoundingClientRect();
-        Object.assign(popup.style, {
-            position: 'absolute',
-            pointerEvents: 'none',
-            background: 'white',
-            color: 'black',
-            zIndex: '2147483646',
-            top: `${rect.bottom + (document.documentElement.scrollTop || document.body.scrollTop)}px`,
-            left: `${rect.left + (document.documentElement.scrollLeft || document.body.scrollLeft)}px`,
-            width: `${rect.width}px`,
-            // height: `${rect.height}px`
-        });
+            const rect = evt.target.getBoundingClientRect();
+            Object.assign(popup.style, {
+                top: `${rect.bottom + (document.documentElement.scrollTop || document.body.scrollTop)}px`,
+                left: `${rect.left + (document.documentElement.scrollLeft || document.body.scrollLeft)}px`,
+                // width: `${rect.width}px`,
+                // height: `${rect.height}px`
+            });
 
-        const root = document.createElement('div');
-        root.translate = false;
+            const root = document.createElement('div');
+            root.translate = false;
 
-        const remove = e => document.body.removeChild(root);
-        evt.target.addEventListener('mouseleave', remove);
- 
-        const dom = root.attachShadow({mode: 'closed'});
-        dom.appendChild(popup);
-        document.body.appendChild(root);
+            const stylesheet = document.createElement('link');
+            stylesheet.rel = 'stylesheet';
+            stylesheet.href = compat.runtime.getURL('InPageTranslation-popup.css')
+     
+            const dom = root.attachShadow({mode: 'closed'});
+            dom.appendChild(stylesheet);
+            dom.appendChild(popup);
+            
+            document.body.appendChild(root);
+
+            // Remove popup if you leave the element
+            once(evt.target, 'mouseleave', () => document.body.removeChild(root));
+        };
+
+        // Only trigger the popup after 1s
+        const timer = setTimeout(render, 1000);
+        once(evt.target, 'mouseleave', () => clearTimeout(timer));
     }
 }
