@@ -1,0 +1,32 @@
+:root {
+	color-scheme: light dark;
+}
+
+.popup {
+	position: absolute;
+	z-index: 10000;
+	background: canvas;
+	color: canvastext;
+	font-size: 14px;
+	padding: 14px;
+	border: 1px solid rgba(0, 0, 0, 0.25);
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+	
+	/* Shadow from https://getcssscan.com/css-box-shadow-examples */
+	box-shadow: rgba(0, 0, 0, 0.16) 0px 3px 6px, rgba(0, 0, 0, 0.23) 0px 3px 6px;
+
+	box-sizing: border-box;
+	min-height: calc(40px + 14px);
+	min-width: 80px;
+	width: fit-content;
+
+	overflow: auto;
+}
+
+.popup p {
+	margin: 0 0 .2em 0;
+}
+
+.popup span + span {
+	margin-left: 1ch;
+}

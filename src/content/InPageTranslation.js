@@ -1,5 +1,6 @@
 import "./InPageTranslation.css";
-import { isElementVisible, isElementInViewport } from '../shared/common.js'; 
+import compat from "../shared/compat.js";
+import { isElementVisible, isElementInViewport } from "../shared/common.js";
 
 function computePath(node, root) {
     if (root === undefined)
@@ -29,6 +30,21 @@ function removeTextNodes(node) {
                 break;
         }
     });
+}
+
+function once(target, name, callback, options) {
+    const wrapper = (evt) => {
+        try {
+            callback(evt);
+        } finally {
+            remove()
+        }
+    };
+    var remove = () => { /* `var` because hoisted so `wrapper` can use it */
+        target.removeEventListener(name, wrapper, options);
+    };
+    target.addEventListener(name, wrapper, options);
+    return remove;
 }
 
 /**
@@ -273,6 +289,10 @@ export default class InPageTranslation {
         });
 
         this.isParentQueuedCache = new Map();
+
+        // Bound mouse listener so multiple addEventListener calls don't
+        // register multiple copies, and removeEventListener can be used.
+        this.onMouseEnterCallback = this.onMouseEnter.bind(this); 
     }
 
     /**
@@ -411,6 +431,9 @@ export default class InPageTranslation {
     }
 
     restoreElement(node) {
+        // Remove the [mouseenter] event listener
+        node.removeEventListener('mouseenter', this.onMouseEnterCallback);
+
         const original = this.originalContent.get(node);
 
         // We start tracking a node in enqueueTranslation. If it isn't tracked
@@ -1060,6 +1083,8 @@ export default class InPageTranslation {
             };
 
             merge(node, scratch.body);
+
+            node.addEventListener('mouseenter', this.onMouseEnterCallback);
         };
 
         const updateTextNode = ({id, translated}, node) => {
@@ -1147,5 +1172,93 @@ export default class InPageTranslation {
         // Intentionally not testing for en === en-US to make sure very
         // specific models are not used for translating broad language codes.
         return false;
+    }
+
+    cloneOriginal(node) {
+        const mapping = {
+            'em': 'em',
+            'strong': 'strong',
+            'i': 'em',
+            'b': 'strong',
+            'u': 'u',
+            'small': 'small',
+            'mark': 'span',
+            'time': 'span',
+            'var': 'var',
+            'wbr': 'wbr',
+            'sup': 'sup',
+            'sub': 'sub',
+            'ins': 'ins',
+            'del': 'del',
+            'p': 'p',
+            'h1': 'p',
+            'h2': 'p',
+            'h3': 'p',
+            'h4': 'p',
+            'h5': 'p',
+            'span': 'span',
+            'div': 'div',
+            'th': 'strong',
+            'td': 'span',
+            'li': 'span',
+            'a': 'span',
+        };
+
+        switch (node.nodeType) {
+            case Node.TEXT_NODE: {
+                const original = this.originalContent.get(node);
+                return document.createTextNode(original !== undefined ? original : node.data);
+            }
+            case Node.ELEMENT_NODE: {
+                const original = this.originalContent.get(node);
+                if (original === undefined || mapping[node.tagName.toLowerCase()] === undefined)
+                    return document.createDocumentFragment(); // empty
+                
+                const content = document.createElement(mapping[node.tagName.toLowerCase()]);
+                original.forEach(node => {
+                    const restored = this.cloneOriginal(node);
+                    content.appendChild(restored);
+                });
+                return content;
+            }
+        }
+    }
+
+    onMouseEnter(evt) {
+        const render = () => {
+            const original = this.cloneOriginal(evt.target);
+
+            const popup = document.createElement('div');
+            popup.classList.add('popup');
+            popup.appendChild(original);
+
+            const rect = evt.target.getBoundingClientRect();
+            Object.assign(popup.style, {
+                top: `${rect.bottom + (document.documentElement.scrollTop || document.body.scrollTop)}px`,
+                left: `${rect.left + (document.documentElement.scrollLeft || document.body.scrollLeft)}px`,
+                maxWidth: `${rect.width}px`,
+                // height: `${rect.height}px`
+            });
+
+            const root = document.createElement('div');
+            root.translate = false;
+
+            const stylesheet = document.createElement('link');
+            stylesheet.rel = 'stylesheet';
+            stylesheet.href = compat.runtime.getURL('InPageTranslation-popup.css')
+     
+            const dom = root.attachShadow({mode: 'closed'});
+            dom.appendChild(stylesheet);
+            dom.appendChild(popup);
+            
+            document.body.appendChild(root);
+
+            // Remove popup if you leave the element
+            once(evt.target, 'mouseleave', () => document.body.removeChild(root));
+        };
+
+        // Only trigger the popup after 1s
+        const timer = setTimeout(render, 1000);
+        once(evt.target, 'mouseleave', () => clearTimeout(timer));
     }
 }
