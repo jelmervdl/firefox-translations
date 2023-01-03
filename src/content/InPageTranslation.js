@@ -1177,12 +1177,31 @@ export default class InPageTranslation {
     cloneOriginal(node) {
         const mapping = {
             'em': 'em',
+            'strong': 'strong',
             'i': 'em',
+            'b': 'strong',
             'u': 'u',
+            'small': 'small',
+            'mark': 'span',
+            'time': 'span',
+            'var': 'var',
+            'wbr': 'wbr',
             'sup': 'sup',
             'sub': 'sub',
             'ins': 'ins',
-            'del': 'del'
+            'del': 'del',
+            'p': 'p',
+            'h1': 'p',
+            'h2': 'p',
+            'h3': 'p',
+            'h4': 'p',
+            'h5': 'p',
+            'span': 'span',
+            'div': 'div',
+            'th': 'strong',
+            'td': 'span',
+            'li': 'span',
+            'a': 'span',
         };
 
         switch (node.nodeType) {
@@ -1192,10 +1211,10 @@ export default class InPageTranslation {
             }
             case Node.ELEMENT_NODE: {
                 const original = this.originalContent.get(node);
-                if (original === undefined)
+                if (original === undefined || mapping[node.tagName.toLowerCase()] === undefined)
                     return document.createDocumentFragment(); // empty
                 
-                const content = document.createElement(mapping[node.tagName.toLowerCase()] || 'span');
+                const content = document.createElement(mapping[node.tagName.toLowerCase()]);
                 original.forEach(node => {
                     const restored = this.cloneOriginal(node);
                     content.appendChild(restored);
@@ -1217,7 +1236,7 @@ export default class InPageTranslation {
             Object.assign(popup.style, {
                 top: `${rect.bottom + (document.documentElement.scrollTop || document.body.scrollTop)}px`,
                 left: `${rect.left + (document.documentElement.scrollLeft || document.body.scrollLeft)}px`,
-                // width: `${rect.width}px`,
+                maxWidth: `${rect.width}px`,
                 // height: `${rect.height}px`
             });
 

@@ -22,3 +22,11 @@
 
 	overflow: auto;
 }
+
+.popup p {
+	margin: 0 0 .2em 0;
+}
+
+.popup span + span {
+	margin-left: 1ch;
+}
