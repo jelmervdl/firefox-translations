@@ -55,6 +55,11 @@
 		"browser_style": true,
 		"chrome_style": true
 	},
+	"sidebar_action": {
+		"default_icon": "/assets/icons/translateLocally_logo.32.png",
+		"default_title" : "TranslateLocally",
+		"default_panel": "sidebar.html"
+	},
 	"icons":
 	{
 		"48": "/assets/icons/translateLocally_logo.48.png",

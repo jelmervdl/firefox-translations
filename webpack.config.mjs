@@ -68,7 +68,8 @@ export default {
     'background-script': './src/background/background-script.js',
     'benchmark': './src/benchmark/benchmark.js',
     'options': './src/options/options.js',
-    'popup': './src/popup/popup.js'
+    'popup': './src/popup/popup.js',
+    'sidebar': './src/sidebar/sidebar.js',
   },
   output: {
     path: distPath,
@@ -105,6 +106,9 @@ export default {
         },
         {
           from: 'src/popup/popup.html'
+        },
+        {
+          from: 'src/sidebar/sidebar.html'
         },
         {
           from: 'src/content/OutboundTranslation.css'

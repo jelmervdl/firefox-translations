@@ -690,11 +690,53 @@ function connectPopup(popup) {
     });
 }
 
+function connectSidebar(sidebar) {
+    const tab = getTab(-1); // Fake tab
+
+    connectTab(tab, sidebar);
+
+    // Dirty hack to get the model list available in the sidebar
+    provider.get().then(async translator => {
+        const models = await translator.registry;
+        tab.update(state => ({models}));
+    });
+
+    sidebar.onMessage.addListener(async message => {
+        switch (message.command) {
+            case "TranslateRequest":
+                try {
+                    const translator = await provider.get();
+                    const response = await translator.translate(message.data);
+                    sidebar.postMessage({
+                        command: "TranslateResponse",
+                        data: response
+                    });
+                } catch(e) {
+                    // Catch error messages caused by abort()
+                    if (e?.message === 'removed by filter')
+                        return;
+
+                    // Tell the requester that their request failed.
+                    sidebar.postMessage({
+                        command: "TranslateResponse",
+                        data: {
+                            request: message.data,
+                            error: e.message
+                        }
+                    });
+                }
+                break;
+        }
+    })
+}
+
 async function main() {
     // Receive incoming connection requests from content-script and popup
     compat.runtime.onConnect.addListener((port) => {
         if (port.name == 'content-script')
             connectContentScript(port);
+        else if (port.name == 'sidebar')
+            connectSidebar(port);
         else if (port.name.startsWith('popup-'))
             connectPopup(port);
     });
