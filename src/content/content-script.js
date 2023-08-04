@@ -1,102 +1,91 @@
 import compat from '../shared/compat.js';
+import { MessageHandler } from '../shared/common.js';
 import LanguageDetection from './LanguageDetection.js';
 import InPageTranslation from './InPageTranslation.js';
 import SelectionTranslation from './SelectionTranslation.js';
 import OutboundTranslation from './OutboundTranslation.js';
 import { LatencyOptimisedTranslator } from '@browsermt/bergamot-translator';
 import preferences from '../shared/preferences.js';
+import { lazy } from '../shared/func.js';
 
 const listeners = new Map();
-
-const state = {
-    state: 'page-loaded'
-};
 
 // Loading indicator for html element translation
 preferences.bind('progressIndicator', progressIndicator => {
     document.body.setAttribute('x-bergamot-indicator', progressIndicator);
 }, {default: ''})
 
-function on(command, callback) {
-    if (!listeners.has(command))
-        listeners.set(command, []);
-
-    listeners.get(command).push(callback);
-}
-
-on('Update', diff => {
-    Object.assign(state, diff);
-    // document.body.dataset.xBergamotState = JSON.stringify(state);
-});
-
-on('Update', diff => {
-    if ('state' in diff) {
-        switch (diff.state) {
-            // Not sure why we have the page-loading event here, like, as soon
-            // as frame 0 connects we know we're in page-loaded territory.
-            case 'page-loading':
-                postBackgroundScriptMessage({
-                    command: 'UpdateRequest',
-                    data: {state: 'page-loaded'}
-                });
-                break;
-            
-            case 'translation-in-progress':
-                inPageTranslation.addElement(document.querySelector("head > title"));
-                inPageTranslation.addElement(document.body);
-                inPageTranslation.start(state.from);
-                break;
-            
-            default:
-                inPageTranslation.restore();
-                break;
-        }
-    }
-});
-
-on('Update', async diff => {
-    if ('state' in diff && diff.state === 'page-loaded') {
-        // request the language detection class to extract a page's snippet
-        const languageDetection = new LanguageDetection();
-        const sample = await languageDetection.extractPageContent();
-        const suggested = languageDetection.extractSuggestedLanguages();
-
-        // Once we have the snippet, send it to background script for analysis
-        // and possibly further action (like showing the popup)
-        postBackgroundScriptMessage({
-            command: "DetectLanguage",
-            data: {
-                url: document.location.href,
-                sample,
-                suggested
-            }
-        });
-    }
-});
-
-on('Update', diff => {
-    if ('debug' in diff) {
-        if (diff.debug)
-            document.querySelector('html').setAttribute('x-bergamot-debug', JSON.stringify(state));
-        else
-            document.querySelector('html').removeAttribute('x-bergamot-debug');
-    }
-});
+preferences.bind('debug', debug => {
+    if (debug)
+        document.querySelector('html').setAttribute('x-bergamot-debug', true);
+    else
+        document.querySelector('html').removeAttribute('x-bergamot-debug');
+}, {default: false});
 
 const sessionID = new Date().getTime();
 
-// Used to track the last text selection translation request, so we don't show
-// the response to an old request by accident.
-let selectionTranslationId = null;
+async function detectPageLanguage() {
+    // request the language detection class to extract a page's snippet
+    const languageDetection = new LanguageDetection();
+    const sample = await languageDetection.extractPageContent();
+    const suggested = languageDetection.extractSuggestedLanguages();
 
-function translate(text, user) {
-    console.assert(state.from !== undefined && state.to !== undefined, "state.from or state.to is not set");
-    postBackgroundScriptMessage({
+    // Once we have the snippet, send it to background script for analysis
+    // and possibly further action (like showing the popup)
+    compat.runtime.sendMessage({
+        command: "DetectLanguage",
+        data: {
+            url: document.location.href,
+            sample,
+            suggested
+        }
+    });
+}
+
+// Changed by translation start requests.
+const state = {
+    from: null,
+    to: null
+};
+
+// background-script connection is only used for translation
+let connection = lazy(async (self) => {
+    const port = compat.runtime.connect({name: 'content-script'});
+
+    // Reset lazy connection instance if port gets disconnected
+    port.onDisconnect.addListener(() => self.reset());
+
+    // Likewise, if the connection is reset from outside, disconnect port.
+    self.onReset(() => port.disconnect());
+
+    const handler = new MessageHandler(callback => {
+        port.onMessage.addListener(callback);
+    })
+
+    handler.on('TranslateResponse', data => {
+        switch (data.request.user?.source) {
+            case 'InPageTranslation':
+                inPageTranslation.enqueueTranslationResponse(data);
+                break;
+            case 'SelectionTranslation':
+                selectionTranslation.enqueueTranslationResponse(data);
+                break;
+            case 'OutboundTranslation':
+                outboundTranslationWorker.enqueueTranslationResponse(data);
+                break;
+        }
+    });
+
+    return port;
+});
+
+async function translate(text, user) {
+    (await connection).postMessage({
         command: "TranslateRequest",
         data: {
             // translation request
-            from: state.from,
-            to: state.to,
+            from: user.from || state.from,
+            to: user.to || state.to,
             html: user.html,
             text,
 
@@ -185,33 +174,14 @@ class BackgroundScriptWorkerProxy {
             throw new TypeError('Only batches of 1 are expected');
 
         return new Promise((accept, reject) => {
-            const request = {
-                // translation request
-                from: models[0].from,
-                to: models[0].to,
-                html: texts[0].html,
-                text: texts[0].text,
-
-                // data useful for the response
-                user: {
-                    id: ++this.#serial,
-                    source: 'OutboundTranslation'
-                },
-                
-                // data useful for the scheduling
-                priority: 3,
-
-                // data useful for recording
-                session: {
-                    id: sessionID,
-                    url: document.location.href
-                }
-            };
-
             this.#pending.set(request.user.id, {request, accept, reject});
-            postBackgroundScriptMessage({
-                command: "TranslateRequest",
-                data: request
+            translate(texts[0].text, {
+                id: ++this.#serial,
+                source: 'OutboundTranslation',
+                from: texts[0].from,
+                to: texts[0].to,
+                html: texts[0].html,
+                priority: 3
             });
         })
     }
@@ -270,116 +240,71 @@ const outboundTranslation = new OutboundTranslation(new class {
     }
 }());
 
-// This one is mainly for the TRANSLATION_AVAILABLE event
-on('Update', async (diff) => {
-    if ('from' in diff)
-        outboundTranslation.setPageLanguage(diff.from);
+const handler = new MessageHandler(callback => {
+    compat.runtime.onMessage.addListener(callback);
+})
 
-    const preferredLanguage = await preferences.get('preferredLanguageForOutboundTranslation');
+handler.on('TranslatePage', ({from,to}) => {
+    // Save for the translate() function
+    Object.assign(state, {from,to});
 
-    if ('to' in diff)
-        outboundTranslation.setUserLanguage(preferredLanguage || diff.to);
+    inPageTranslation.addElement(document.querySelector("head > title"));
+    inPageTranslation.addElement(document.body);
+    inPageTranslation.start(from);
+})
 
-    if ('from' in diff || 'models' in diff) {
-        outboundTranslation.setUserLanguageOptions(state.models.reduce((options, entry) => {
-            // `state` has already been updated at this point as well and we know
-            // that is complete. `diff` might not contain all the keys we need.
-            if (entry.to === state.from && !options.has(entry.from))
-                options.add(entry.from)
-            return options
-        }, new Set()));
-    }
-});
+handler.on('RestorePage', () => {
+    inPageTranslation.restore();
+})
 
-on('TranslateResponse', data => {
-    switch (data.request.user?.source) {
-        case 'InPageTranslation':
-            inPageTranslation.enqueueTranslationResponse(data);
-            break;
-        case 'SelectionTranslation':
-            selectionTranslation.enqueueTranslationResponse(data);
-            break;
-        case 'OutboundTranslation':
-            outboundTranslationWorker.enqueueTranslationResponse(data);
-            break;
-    }
-});
-
-// Timeout of retrying connectToBackgroundScript()
-let retryTimeout = 100;
-
-let backgroundScript;
-
-function postBackgroundScriptMessage(message) {
-    if (!backgroundScript)
-        connectToBackgroundScript();
-
-    return backgroundScript.postMessage(message);
-}
-
-function connectToBackgroundScript() {
-    // If we're already connected (e.g. when this function was called directly
-    // but then also through 'pageshow' event caused by 'onload') ignore it.
-    if (backgroundScript)
-        return;
-
-    // Connect to our background script, telling it we're the content-script.
-    backgroundScript = compat.runtime.connect({name: 'content-script'});
-
-    // Connect all message listeners (the "on()" calls above)
-    backgroundScript.onMessage.addListener(({command, data}) => {
-        if (listeners.has(command))
-            listeners.get(command).forEach(callback => callback(data));
-
-        // (We're connected, reset the timeout)
-        retryTimeout = 100;
-    });
-
-    // When the background script disconnects, also pause in-page translation
-    backgroundScript.onDisconnect.addListener(() => {
-        inPageTranslation.stop();
-
-        // If we cannot connect because the backgroundScript is not (yet?) 
-        // available, try again in a bit.
-        if (backgroundScript.error && backgroundScript.error.toString().includes('Receiving end does not exist')) {
-            // Exponential back-off sounds like a safe thing, right?
-            retryTimeout *= 2;
-
-            // Fallback fallback: if we keep retrying, stop. We're just wasting CPU at this point.
-            if (retryTimeout < 5000)
-                setTimeout(connectToBackgroundScript, retryTimeout);
-        }
-
-        // Mark as disconnected
-        backgroundScript = null;
-    });
-}
-
-connectToBackgroundScript();
+detectPageLanguage();
 
 // When this page shows up (either through onload or through history navigation)
-window.addEventListener('pageshow', connectToBackgroundScript);
+window.addEventListener('pageshow', () => {
+    // TODO: inPageTranslation.resume()???
+});
 
 // When this page disappears (either onunload, or through history navigation)
 window.addEventListener('pagehide', e => {
-    if (backgroundScript) {
-        backgroundScript.disconnect();
-        backgroundScript = null;
-    }
+    // Ditch the inPageTranslation state for pending translation requests.
+    inPageTranslation.stop();
+    
+    // Disconnect from the background page, which will trigger it to prune
+    // our outstanding translation requests.
+    connection.reset();
 });
 
 let lastClickedElement = null;
 
 window.addEventListener('contextmenu', e => {
+    Object.assign(state, {from, to}); // TODO: HACK!
     lastClickedElement = e.target;
 }, {capture: true});
 
-on('TranslateSelection', () => {
+handler.on('TranslateSelection', ({from, to}) => {
+    Object.assign(state, {from, to}); // TODO: HACK!
     const selection = document.getSelection();
     selectionTranslation.start(selection);
 });
 
-on('ShowOutboundTranslation', () => {
+handler.on('ShowOutboundTranslation', async ({from, to, models}) => {
+    if (from)
+        outboundTranslation.setPageLanguage(from);
+
+    const {preferredLanguageForOutboundTranslation} = await preferences.get({preferredLanguageForOutboundTranslation:undefined});
+    if (to)
+        outboundTranslation.setUserLanguage(preferredLanguageForOutboundTranslation || to);
+
+    if (from || models) {
+        outboundTranslation.setUserLanguageOptions(models.reduce((options, entry) => {
+            // `state` has already been updated at this point as well and we know
+            // that is complete. `diff` might not contain all the keys we need.
+            if (entry.to === from && !options.has(entry.from))
+                options.add(entry.from)
+            return options
+        }, new Set()));
+    }
+
     outboundTranslation.target = lastClickedElement;
     outboundTranslation.start();
 });

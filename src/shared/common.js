@@ -61,6 +61,8 @@ function stringifyAST(expression) {
 			return `${stringifyAST(expression.callee)}(${expression.arguments.map(arg => stringifyAST(arg)).join(', ')})`;
 		case 'ArrayExpression':
 			return `[${expression.elements.map(element => stringifyAST(element)).join(', ')}]`;
+		case 'ConditionalExpression':
+			return `${stringifyAST(expression.test)} ? ${stringifyAST(expression.consequent)} : ${stringifyAST(expression.alternate)}`;
 		case 'Identifier':
 			return `${expression.name}`
 		case 'Literal':
@@ -77,8 +79,8 @@ const binaryOperators = {
 	 '!=': (left, right) => (state) => left(state)  != right(state),
 	 '<=': (left, right) => (state) => left(state)  <= right(state),
 	 '>=': (left, right) => (state) => left(state)  >= right(state),
-	  '<': (left, right) => (state) => left(state)   < right(state),
-	  '>': (left, right) => (state) => left(state)   > right(state),
+		'<': (left, right) => (state) => left(state)   < right(state),
+		'>': (left, right) => (state) => left(state)   > right(state),
 	 '&&': (left, right) => (state) => left(state)  && right(state),
 	 '||': (left, right) => (state) => left(state)  || right(state),
 }
@@ -124,6 +126,11 @@ function compileAST(expression, flags={}) {
 				return fun.apply(undefined, args.map(arg => arg(state)));
 			};
 		}
+		case 'ConditionalExpression':
+			const test = compileAST(expression.test);
+			const consequent = compileAST(expression.consequent);
+			const alternate = compileAST(expression.alternate);
+			return (state) => test(state) ? consequent(state) : alternate(state);
 		case 'ArrayExpression':
 			const elements = expression.elements.map(element => compileAST(element));
 			return (state) => elements.map(element => element(state));
@@ -269,6 +276,32 @@ export function debounce(callable) {
 	};
 }
 
+export class Timer {
+	constructor() {
+		this.timeout = null;
+	}
+
+	/**
+	 * calls callback delayed. If there's already a delayed callback scheduled,
+	 * the callback will be set to the new one, but the timeout will just continue
+	 * and not reset from the beginning of `delay`.
+	 */
+	delayed(callback, delay) {
+		if (this.timeout === null)
+			this.timeout = setTimeout(this.immediate.bind(this), delay);
+		this.callback = callback;
+	}
+
+	/**
+	 * Call callback now, and clear any previously scheduled callback.
+	 */
+	immediate(callback) {
+		clearTimeout(this.timeout);
+		this.timeout = null;
+		(callback || this.callback)();
+	}
+}
+
 export async function* asCompleted(iterable) {
 	const promises = new Set(iterable);
 	while (promises.size() > 0) {
@@ -344,4 +377,56 @@ export function createElement(name, attributes, children) {
 	}
 
 	return el
+}
+
+export function download(url, name) {
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = name;
+	a.click();
+	a.addEventListener('click', e => {
+		requestIdleCallback(() => {
+			URL.revokeObjectURL(url);
+		});
+	});
+}
+
+/**
+ * Helper class to wrap around a message channel supporting messages in the
+ * form {command:String,data:Object}.
+ */
+export class MessageHandler {
+	#listeners;
+
+	constructor(register) {
+		this.#listeners = new Map();
+
+		register((message, ...rest) => {
+			if (!this.#listeners.has(message.command))
+				console.warn('Received unhandled message', message);
+			else {
+				console.info('Received', message);
+				this.#listeners.get(message.command)(message.data, ...rest);
+			}
+		})
+	}
+
+	on(command, handler) {
+		this.#listeners.set(command, handler);
+	}
+}
+
+export class DefaultMap extends Map {
+	#factory;
+
+	constructor(factory) {
+		super();
+		this.#factory = factory;
+	}
+
+	get(key) {
+		if (!this.has(key))
+			this.set(key, this.#factory(key));
+		return super.get(key);
+	}
 }
