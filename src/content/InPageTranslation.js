@@ -873,7 +873,7 @@ export default class InPageTranslation {
         let priority = 2;
         if (!isElementVisible(node))
             priority = 3;
-        else if (isElementInViewport(node))
+        else if (isElementInViewport(node) || node instanceof HTMLTitleElement)
             priority = 1;
 
         // Record it?
