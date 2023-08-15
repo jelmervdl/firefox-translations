@@ -1,6 +1,8 @@
 {
 	"manifest_version": 3,
-	"name": "TranslateLocally for Firefox",
+	"name": "TranslateLocally web extension",
+	"name<firefox-desktop>": "TranslateLocally for Firefox",
+	"name<chromium>": "TranslateLocally for Chrome",
 	"version": "0.0.1",
 	"browser_specific_settings":
 	{

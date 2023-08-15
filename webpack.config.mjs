@@ -48,8 +48,10 @@ function extend(dst, src) {
     if (dst === undefined)
       dst = [];
     dst.splice(dst.length, 0, ...src);
-  } else {
+  } else if (typeof src === 'object') {
     dst = Object.assign(dst || {}, src);
+  } else {
+    dst = src;
   }
   return dst;
 }
