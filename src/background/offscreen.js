@@ -1,4 +1,6 @@
 import WASMTranslationHelper from "./WASMTranslationHelper.js";
+import { PromiseWithProgress } from "../shared/promise.js";
+import { MessageHandler } from "../shared/common.js";
 
 let helper = null;
 
@@ -10,46 +12,75 @@ function cloneError(error) {
 	};
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
 	if (message.target !== 'offscreen')
 		return false;
 
-	const waitAndRespond = (promise) => Promise.resolve(promise).then(
-		result => {
-			console.log("Result", result);
-			sendResponse({result})
-		},
-		error => {
-			console.log('Error', error);
-			sendResponse({error: cloneError(error)});
-		}
-	);
+	if (message.command === 'Connect' && message.data?.token !== undefined) {
+		const port = chrome.runtime.connect({name: message.data.token});
 
-	switch (message.command) {
-		case 'Initialize':
-			waitAndRespond((async () => {
-				console.log('Initialize');
+		const context = {
+			helper: undefined
+		};
 
-				if (helper)
-					await helper.delete();
+		port.onDisconnect.addListener(() => {
+			if (context.helper)
+				context.helper.delete();
+		});
 
-				helper = new WASMTranslationHelper(...message.data.args);
-				console.log('Initialized');
-				return undefined;
-			})());
-			break;
+		port.onMessage.addListener(({id, command, data}) => {
+			const waitAndRespond = (promise) => {
+				if (promise instanceof PromiseWithProgress) {
+					promise.addProgressListener(progress => {
+						port.postMessage({
+							command: 'Progress',
+							id,
+							data: {progress}
+						});
+					});
+				}
+				Promise.resolve(promise).then(
+					result => {
+						port.postMessage({
+							command: 'Accept',
+							id,
+							data: {result}
+						})
+					},
+					error => {
+						port.postMessage({
+							command: 'Reject',
+							id,
+							data: {error}
+						})
+					}
+				);
+			}
 
-		case 'Get':
-			console.log('Get', message.data.property);
-			waitAndRespond(Reflect.get(helper, message.data.property, helper));
-			break;
+			switch (command) {
+				case 'Initialize':
+					waitAndRespond((async () => {
+						console.log('Initialize');
 
-		case 'Call':
-			console.log('Call', message.data.name);
-			waitAndRespond(Reflect.apply(helper[message.data.name], helper, message.data.args));
-			break;
+						if (context.helper)
+							await context.helper.delete();
+
+						context.helper = new WASMTranslationHelper(...data.args);
+						console.log('Initialized');
+						return undefined;
+					})());
+					break;
+
+				case 'Get':
+					console.log('Get', data.property);
+					waitAndRespond(Reflect.get(context.helper, data.property, context.helper));
+					break;
+
+				case 'Call':
+					console.log('Call', message.data.name);
+					waitAndRespond(Reflect.apply(context.helper[data.name], context.helper, data.args));
+					break;
+			}
+		});
 	}
-	
-	// for async sendResponse according to https://developer.chrome.com/docs/extensions/mv2/messaging/
-	return true;
 });

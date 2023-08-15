@@ -429,7 +429,10 @@ handler.on("DownloadModels", async ({tabId, from, to, models}) => {
             // property this model has changed. We don't support
             // any nested key updates so let's just push the whole
             // damn thing.
-            compat.runtime.sendMessage('Models', await translator.registry);
+            compat.runtime.sendMessage({
+                command: 'Models',
+                data: await translator.registry
+            });
         })
     });
 

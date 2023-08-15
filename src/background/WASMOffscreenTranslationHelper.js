@@ -1,5 +1,13 @@
+import { PromiseWithProgress } from "../shared/promise";
+
 export default class WASMOffscreenTranslationHelper {
+    #connection;
+
     #initialized;
+
+    #serial = 0;
+
+    #pending = new Map();
 
     constructor(options) {
         this.#initialized = (async () => {
@@ -15,53 +23,82 @@ export default class WASMOffscreenTranslationHelper {
                 });
             }
 
-            // Re-initialise regardless (TODO: really?)
-            const {error} = await chrome.runtime.sendMessage({
+            // Token we tell to offscreen so we know which connection request
+            // was theirs.
+            const token = crypto.randomUUID();
+
+            // Ask offscreen to connect. It might already be running, so we
+            // don't want to rely on a onLoad -> connect to background-page
+            // type of construction.
+            chrome.runtime.sendMessage({
                 target: 'offscreen',
-                command: 'Initialize',
-                data: {
-                    args: [options]
-                }
+                command: 'Connect',
+                data: {token}
             });
 
-            if (error !== undefined)
-                throw error;
-            
+            // Catch offscreen's connect call
+            this.#connection = await new Promise((accept) => {
+                chrome.runtime.onConnect.addListener(function callback (port) {
+                    if (port.name === token) {
+                        accept(port);
+                        chrome.runtime.onConnect.removeListener(callback);
+                    }
+                });
+            });
+
+            this.#connection.onMessage.addListener(({id, command, data}) => {
+                const {accept, reject, progress} = this.#pending.get(id);
+                switch (command) {
+                    case 'Progress':
+                        progress(data.progress);
+                        return;  // Skip `clear(id)` bit.
+                    case 'Accept':
+                        accept(data.result);
+                        break;
+                    case 'Reject':
+                        reject(data.error);
+                        break;
+                }
+                this.#pending.delete(id);
+            });
+
+            // Re-initialise regardless (TODO: really?)
+            await new Promise((accept, reject) => {
+                this.#sendMessage({
+                    command: 'Initialize',
+                    data: {
+                        args: [options]
+                    },
+                }, [accept, reject]);
+            });
+
             return true;
         })();
     }
 
-    async #call(name, args) {
-        await this.#initialized;
+    #sendMessage(data, [accept, reject, progress]) {
+        const id = ++this.#serial;
+        this.#pending.set(id, {accept, reject, progress});
+        this.#connection.postMessage({...data, id});
+    }
 
-        const {result, error} = await chrome.runtime.sendMessage({
-            target: 'offscreen',
-            command: 'Call',
-            data: {name, args}
-        });
-
-        if (error !== undefined)
-            throw error;
-
-        return result;
+    async #call(name, args, PromiseImpl=Promise) {
+        return new PromiseImpl(async (...callbacks) => {
+            await this.#initialized;
+            this.#sendMessage({
+                command: 'Call',
+                data: {name, args}
+            }, callbacks);
+        })
     }
 
     #get(property) {
-        return new Promise(async (accept, reject) => {
+        return new Promise(async (...callbacks) => {
             await this.#initialized;
-            
-            const out = await chrome.runtime.sendMessage({
-                target: 'offscreen',
+            this.#sendMessage({
                 command: 'Get',
                 data: {property}
-            });
-
-            const {result, error} = out;
-
-            if (error !== undefined)
-                reject(error)
-            else
-                accept(result);
+            }, callbacks);
         });
     }
 
@@ -70,7 +107,7 @@ export default class WASMOffscreenTranslationHelper {
     }
 
     downloadModel(id) {
-        return this.#call('downloadModel', [id]); // normally returns PromiseWithProgress
+        return this.#call('downloadModel', [id], PromiseWithProgress); // normally returns PromiseWithProgress
     }
 
     translate(request) {
@@ -82,7 +119,9 @@ export default class WASMOffscreenTranslationHelper {
     }
 
     delete() {
-        chrome.offscreen.closeDocument();
+        if (this.#connection)
+            this.#connection.disconnect();
+
         this.#initialized = null;
     }
 }

@@ -80,6 +80,7 @@ async function main(tab) {
 	// the background-script.
 	handler.on('Progress', (data) => {
 		local.set(data);
+		console.log('Progress', data);
 	});
 
 	// Sent as a response to connecting, but also when after downloading
@@ -87,6 +88,7 @@ async function main(tab) {
 	handler.on('Models', (data) => {
 		models.clear();
 		data.forEach(entry => models.set(entry.model.id, entry));
+		render();
 	});
 
 	let lastRenderedState = undefined;
@@ -94,7 +96,7 @@ async function main(tab) {
 	let renderTimeout = new Timer();
 
 	function render() {
-		console.log('Render popup', tabState, models);
+		console.log('Render popup', tabState, models, models.size > 0);
 		// If the model (or one of the models in case of pivoting) needs 
 		// downloading. This info is not always entirely up-to-date since `local`
 		// is a getter when queried from WASMTranslationHelper, but that doesn't
@@ -187,6 +189,8 @@ async function main(tab) {
 				command: 'DownloadModels',
 				data: {
 					tabId: tab.id,
+					from: tabState.from,
+					to: tabState.to,
 					models: ids
 				}
 			});

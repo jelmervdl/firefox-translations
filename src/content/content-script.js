@@ -70,9 +70,6 @@ let connection = lazy(async (self) => {
             case 'SelectionTranslation':
                 selectionTranslation.enqueueTranslationResponse(data);
                 break;
-            case 'OutboundTranslation':
-                outboundTranslationWorker.enqueueTranslationResponse(data);
-                break;
         }
     });
 
@@ -123,94 +120,96 @@ const selectionTranslation = new SelectionTranslation({
     }
 });
 
-/**
- * Matches the interface of Proxy<TranslationWorker> but wraps the actual
- * translator running in the background script that we communicate with through
- * message passing. With this we can use that instance & models with the
- * LatencyOptimisedTranslator class thinking it is a Worker running the WASM
- * code.
- */
-class BackgroundScriptWorkerProxy {
-    /**
-     * Serial that provides a unique number for each translation request.
-     * @type {Number}
-     */
-    #serial = 0;
-
-    /**
-     * Map of submitted requests and their promises waiting to be resolved.
-     * @type {Map<Number,{
-     *   accept: (translations:Object[]) => Null,
-     *   reject: (error:Error) => null,
-     *   request: Object
-     * }>}
-     */
-    #pending = new Map();
-    
-    async hasTranslationModel({from, to}) {
-        return true;
-    }
-
-    /**
-     * Because `hasTranslationModel()` always returns true this function should
-     * never get called.
-     */
-    async getTranslationModel({from, to}, options) {
-        throw new Error('getTranslationModel is not expected to be called');
-    }
-
-    /**
-     * @param {{
-     *   models: {from:String, to:String}[],
-     *   texts: {
-     *     text: String,
-     *     html: Boolean,
-     *   }[]
-     * }}
-     * @returns {Promise<{request:TranslationRequest, target: {text: String}}>[]}
-     */
-    translate({models, texts}) {
-        if (texts.length !== 1)
-            throw new TypeError('Only batches of 1 are expected');
-
-        return new Promise((accept, reject) => {
-            this.#pending.set(request.user.id, {request, accept, reject});
-            translate(texts[0].text, {
-                id: ++this.#serial,
-                source: 'OutboundTranslation',
-                from: texts[0].from,
-                to: texts[0].to,
-                html: texts[0].html,
-                priority: 3
-            });
-        })
-    }
-
-    enqueueTranslationResponse({request: {user: {id}}, target, error}) {
-        const {request, accept, reject} = this.#pending.get(id);
-        this.#pending.delete(id);
-        if (error)
-            reject(error)
-        else
-            accept([{request, target}]);
-    }
-}
-
-// Fake worker that really just delegates all the actual work to
-// the background script. Lives in this scope as to be able to receive
-// `TranslateResponse` messages (see down below this script.)
-const outboundTranslationWorker = new BackgroundScriptWorkerProxy();
-
-const outboundTranslation = new OutboundTranslation(new class {
+const outboundTranslation = new OutboundTranslation(new class ErzatsTranslatorBacking {
     constructor() {
         // TranslatorBacking that mimics just enough for
         // LatencyOptimisedTranslator to do its work.
         const backing = {
             async loadWorker() {
+                // Pending translation promises.
+                const pending = new Map();
+
+                // Connection to the background script. Pretty close match to 
+                // the one used in the global scope, but by having a separate
+                // connection we can close either to cancel translations without
+                // affecting the others.
+                const connection = lazy(async (self) => {
+                    const port = compat.runtime.connect({name: 'content-script'});
+
+                    // Reset lazy connection instance if port gets disconnected
+                    port.onDisconnect.addListener(() => self.reset());
+
+                    // Likewise, if the connection is reset from outside, disconnect port.
+                    self.onReset(() => port.disconnect());
+
+                    const handler = new MessageHandler(callback => {
+                        port.onMessage.addListener(callback);
+                    })
+
+                    handler.on('TranslateResponse', ({id, target, error}) => {
+                        const {request, accept, reject} = pending.get(id);
+                        pending.delete(id);
+
+                        if (error)
+                            reject(error)
+                        else
+                            accept([{request, target}]);
+                    });
+
+                    return port;
+                });
+
                 return {
-                    exports: outboundTranslationWorker,
+                    // Mimics @browsermt/bergamot-translator/BergamotTranslatorWorker
+                    exports: new class ErzatsBergamotTranslatorWorker {
+                        /**
+                         * Serial that provides a unique number for each translation request.
+                         * @type {Number}
+                         */
+                        #serial = 0;
+
+                        async hasTranslationModel({from, to}) {
+                            return true;
+                        }
+
+                        async getTranslationModel({from, to}, options) {
+                            throw new Error('getTranslationModel is not expected to be called');
+                        }
+
+                        translate({models, texts}) {
+                            if (texts.length !== 1)
+                                throw new TypeError('Only batches of 1 are expected');
+
+                            return new Promise(async (accept, reject) => {
+                                const request = {
+                                    from: models[0].from,
+                                    to:   models[models.length-1].to,
+                                    html: texts[0].html,
+                                    text: texts[0].text,
+                                    user: {
+                                        id: ++this.#serial
+                                    },
+                                    priority: 3
+                                };
+
+                                pending.set(request.user.id, {
+                                    request,
+                                    accept,
+                                    reject
+                                });
+
+                                (await connection).postMessage({
+                                    command: "TranslateRequest",
+                                    data: request
+                                });
+                            })
+                        }
+                    },
                     worker: {
-                        terminate() { return; }
+                        terminate() { 
+                            connection.reset();
+                            pending.clear();
+                        }
                     }
                 };
             },
@@ -254,7 +253,11 @@ handler.on('TranslatePage', ({from,to}) => {
 })
 
 handler.on('RestorePage', () => {
+    // Put original content back
     inPageTranslation.restore();
+
+    // Close translator connection which will cancel pending translations.
+    connection.reset();
 })
 
 detectPageLanguage();
@@ -277,7 +280,6 @@ window.addEventListener('pagehide', e => {
 let lastClickedElement = null;
 
 window.addEventListener('contextmenu', e => {
-    Object.assign(state, {from, to}); // TODO: HACK!
     lastClickedElement = e.target;
 }, {capture: true});
 
