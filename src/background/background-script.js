@@ -68,14 +68,6 @@ const session = new DefaultMap((tabId) => {
 });
 
 /**
- * Runtime storage per tab. Used for progress.
- *@type {Map<Number,StorageArea>}
- */
-const local = new DefaultMap((tabId) => {
-    return new StorageArea();
-});
-
-/**
  * Supported translation providers
  * @type{[name:String]:Promise<Type<TranslationHelper>>}
  */
@@ -139,6 +131,49 @@ preferences.listen(['provider'], () => provider.reset());
 
 const recorder = new Recorder();
 
+// Download progress per tab, per download
+const downloadProgress = new Map()
+
+// Progress per tab, per content script. We can't reset the tab counts to 0 on
+// navigation because it might be a web-app. We also have to account for
+// multiple content scripts per tab in case of frames. So the only indicator
+// of resetting a count is the content script disconnecting. Thus we keep a
+// count per content script, but grouped by tab for ease.
+const translationProgress = new DefaultMap(tabId => new Map());
+
+// Connection to popup per tab
+const popups = new Map();
+
+function updatePopupTranslationProgress(tabId) {
+    popups.get(tabId)?.postMessage({
+        command: 'Progress',
+        data: Array.from(translationProgress.get(tabId).values()).reduce(
+            (acc, count) => ({
+                pendingTranslationRequests: acc.pendingTranslationRequests + count.pending,
+                totalTranslationRequests:   acc.totalTranslationRequests   + count.total
+            }),
+            {
+                pendingTranslationRequests: 0,
+                totalTranslationRequests: 0
+            })
+    });
+}
+
+function updatePopupDownloadProgress(tabId) {
+    const downloads = downloadProgress.get(tabId)?.values() || [];
+    popups.get(tabId)?.postMessage({
+        command: 'Progress',
+        data: Array.from(downloads).reduce((acc, download) => ({
+            modelDownloadRead: acc.modelDownloadRead + download.read,
+            modelDownloadSize: acc.modelDownloadSize + download.size
+        }),
+        {
+            modelDownloadRead: 0,
+            modelDownloadSize: 0
+        })
+    });
+}
+
 let serial = 0;
 
 /**
@@ -156,10 +191,20 @@ function connectContentScript(contentScript) {
         contentScript.onMessage.addListener(callback)
     });
 
+    // Track translation progress
+    const counts = {pending: 0, total: 0};
+    translationProgress.get(tabId).set(contentScript, counts);
+
     // If the content-script stops (i.e. user navigates away)
     contentScript.onDisconnect.addListener(async () => {
         const cancelled = connection;
         connection = null;
+
+        // Remove progress counts for this connection
+        translationProgress.get(tabId).delete(contentScript);
+        if (translationProgress.get(tabId).size === 0)
+            translationProgress.delete(tabId);
+        updatePopupTranslationProgress(tabId);
 
         // Prune any pending translation requests that have this same
         // signal from the queue.
@@ -169,15 +214,9 @@ function connectContentScript(contentScript) {
 
     handler.on("TranslateRequest", async (data) => {
         // Update translation state stats for this tab
-        local.get(tabId).get({
-                pendingTranslationRequests: 0,
-                totalTranslationRequests: 0,
-            }).then((state) => {
-                local.get(tabId).set({
-                    pendingTranslationRequests: state.pendingTranslationRequests + 1,
-                    totalTranslationRequests: state.totalTranslationRequests + 1
-                });
-            });
+        counts.pending += 1;
+        counts.total += 1;
+        updatePopupTranslationProgress(tabId);
 
         // If we're recording requests from this tab, add the translation
         // request. Also disabled when developer setting is false since
@@ -223,17 +262,12 @@ function connectContentScript(contentScript) {
                 data: e
             });
         } finally {
-            local.get(tabId).get({
-                pendingTranslationRequests: 0
-            }).then((state) => {
-                local.get(tabId).set({
-                    // TODO what if we just navigated away and all the
-                    // cancelled translations from the previous page come
-                    // in and decrement the pending count of the current
-                    // page?
-                    pendingTranslationRequests: state.pendingTranslationRequests - 1
-                });
-            });
+            // TODO what if we just navigated away and all the
+            // cancelled translations from the previous page come
+            // in and decrement the pending count of the current
+            // page?
+            counts.pending -= 1;
+            updatePopupTranslationProgress(tabId);
         }
     });
 }
@@ -249,35 +283,19 @@ async function connectPopup(port) {
         })
     });
 
-    const keys = [
-        'pendingTranslationRequests',
-        'totalTranslationRequests',
-        'modelDownloadRead',
-        'modelDownloadSize',
-    ];
-    
-    // Initial progress update
-    local.get(tabId).get(Object.fromEntries(keys.map(key => [key, 0]))).then(data => {
-        port.postMessage({
-            command: 'Progress',
-            data
-        });
-    });
-
-    // Updates when progress changes
-    const stopProgressUpdates = local.get(tabId).listen(keys, data => {
-        port.postMessage({
-            command: 'Progress',
-            data
-        });
-    });
+    popups.set(tabId, port);
+    updatePopupDownloadProgress(tabId);
+    updatePopupTranslationProgress(tabId);
 
     // Note: all other state is synced through chrome.storage.session. Only
     // progress is not because it is very chatty, and only relevant when the
     // background page exists so there's no reason to store it in session.
 
     // Stop progress updates if the popup is closed
-    port.onDisconnect.addListener(stopProgressUpdates);
+    port.onDisconnect.addListener(() => {
+        if (popups.get(tabId) === port)
+            popups.delete(tabId);
+    });
 }
 
 // Receive incoming connection requests from content-script and popup.
@@ -403,6 +421,7 @@ handler.on("DownloadModels", async ({tabId, from, to, models}) => {
 
     // Start the downloads and put them in a {[download:promise]: {read:int,size:int}}
     const downloads = new Map(models.map(model => [translator.downloadModel(model), {read:0.0, size:0.0}]));
+    downloadProgress.set(tabId, downloads);
 
     // For each download promise, add a progress listener that updates the tab state
     // with how far all our downloads have progressed so far.
@@ -414,10 +433,7 @@ handler.on("DownloadModels", async ({tabId, from, to, models}) => {
                 downloads.set(promise, {read, size});
 
                 // Update tab state about all downloads combined (i.e. model, optionally pivot)
-                const data = await local.get(tabId).set({
-                    modelDownloadRead: Array.from(downloads.values()).reduce((sum, {read}) => sum + read, 0),
-                    modelDownloadSize: Array.from(downloads.values()).reduce((sum, {size}) => sum + size, 0)
-                })
+                updatePopupDownloadProgress(tabId);
             });
         }
 
@@ -436,11 +452,16 @@ handler.on("DownloadModels", async ({tabId, from, to, models}) => {
     // Finally, when all downloads have finished, start translating the page.
     try {
         await Promise.all(downloads.keys());
+        
+        downloadProgress.delete(tabId);
+        updatePopupDownloadProgress(tabId);
+
         session.get(tabId).set({
             translate: true,
             from,
             to
         });
+
         compat.tabs.sendMessage(tabId, {
             command: 'TranslatePage',
             data: {from, to}
