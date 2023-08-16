@@ -949,7 +949,18 @@ export default class InPageTranslation {
             // against the current real document. HTML from `translated` will
             // never be added as-is to the live document. The translator cannot
             // "dream up" new elements. It can at most duplicate existing ones.
-            const scratch = parser.parseFromString(translated, 'text/html');
+            // Using <template> here to handle orphan <td>'s which otherwise
+            // get stripped by Chromium.
+            const scratch = parser.parseFromString(`
+                <!DOCTYPE html>
+                <html>
+                    <head>
+                        <meta charset="utf-8">
+                    </head>
+                    <body>
+                        <template>${translated}</template>
+                    </body>
+                </html>`, 'text/html');
 
             const originalHTML = node.innerHTML;
 
@@ -1068,7 +1079,7 @@ export default class InPageTranslation {
                     });
             };
 
-            merge(node, scratch.body);
+            merge(node, scratch.body.firstElementChild.content);
         };
 
         const updateTextNode = ({id, translated}, node) => {
