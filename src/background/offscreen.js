@@ -51,7 +51,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 						port.postMessage({
 							command: 'Reject',
 							id,
-							data: {error}
+							data: {error: cloneError(error)}
 						})
 					}
 				);
