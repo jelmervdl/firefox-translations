@@ -410,13 +410,6 @@ handler.on('DetectLanguage', async (data, sender) => {
 
 // Sent from the popup when the download button is clicked.
 handler.on("DownloadModels", async ({tabId, from, to, models}) => {
-    // Tell the tab we're downloading models
-    /*
-    tab.update(state => ({
-        state: State.DOWNLOADING_MODELS
-    }));
-    */
-
     const translator = await provider;
 
     // Start the downloads and put them in a {[download:promise]: {read:int,size:int}}
