@@ -412,11 +412,14 @@ export default class OutboundTranslation {
 
 		document.body.appendChild(this.element);
 
-		this.#restore(); // async, does focus() when time is ready
-		
-		this.#renderFocusRing();
+		// After painting…
+		requestIdleCallback(() => {
+			this.#restore(); // async, does focus() when time is ready
+			
+			this.#renderFocusRing();
 
-		this.#scrollIfNecessary();
+			this.#scrollIfNecessary(); // makes sure original input field is in view
+		});
 	}
 
 	/**
@@ -605,7 +608,7 @@ export default class OutboundTranslation {
 	 */
 	#scrollIfNecessary() {
 		// `20` is about a line height, `320` is line height + bottom panel
-		if (!isElementInViewport(this.#target, {top: 20, bottom: 320}))
+		if (!isElementInViewport(this.#target, {top: 20, bottom: 20 + this.height}))
 			this.#target.scrollIntoView();
 
 		// TODO: replace this by something that prefers to scroll it closer to
