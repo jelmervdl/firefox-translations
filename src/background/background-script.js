@@ -510,16 +510,14 @@ compat.runtime.onInstalled.addListener(() => {
 compat.contextMenus.onClicked.addListener(async ({menuItemId, frameId}, tab) => {
     // First sanity check whether we know from and to languages
     // (and it isn't the same by accident)
-    const {from, to} = session.get(tab.id).get({from, to});
+    const {from, to} = await session.get(tab.id).get({from: undefined, to: undefined});
 
     // Send the appropriate message down to the content script of the
     // tab we just clicked inside of.
     switch (menuItemId) {
         case 'translate-selection':
-            if (from === undefined || to === undefined || from === to) {
-                compat.action.openPopup();
-                break;
-            }
+            if (from === undefined || to === undefined || from === to)
+                break; // Euh, what to do? Can't trigger a popup anymore
 
             compat.tabs.sendMessage(tab.id, {
                 command: 'TranslateSelection',

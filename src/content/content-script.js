@@ -122,8 +122,8 @@ const selectionTranslation = new SelectionTranslation({
 
 const outboundTranslation = new OutboundTranslation(new class ErzatsTranslatorBacking {
     constructor() {
-        // TranslatorBacking that mimics just enough for
-        // LatencyOptimisedTranslator to do its work.
+        // TranslatorBacking that is really just a proxy, but mimics just enough
+        // for LatencyOptimisedTranslator to do its work.
         const backing = {
             async loadWorker() {
                 // Pending translation promises.
@@ -146,7 +146,7 @@ const outboundTranslation = new OutboundTranslation(new class ErzatsTranslatorBa
                         port.onMessage.addListener(callback);
                     })
 
-                    handler.on('TranslateResponse', ({id, target, error}) => {
+                    handler.on('TranslateResponse', ({request: {user: {id}}, target, error}) => {
                         const {request, accept, reject} = pending.get(id);
                         pending.delete(id);
 

@@ -77,7 +77,10 @@
 			"resources": [
 				"assets/fonts/FlowBlock-Regular.woff2",
 				"assets/fonts/FlowCircular-Regular.woff2",
-				"assets/fonts/FlowRounded-Regular.woff2"
+				"assets/fonts/FlowRounded-Regular.woff2",
+				"OutboundTranslation.css",
+				"InPageTranslation.css",
+				"SelectionTranslation.css"
 			]
 		}
 	],
