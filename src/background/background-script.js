@@ -139,29 +139,16 @@ preferences.listen(['provider'], () => provider.reset());
 
 const recorder = new Recorder();
 
+let serial = 0;
+
 /**
  * Connects the port of a content-script or popup with the state management
  * mechanism of the tab. This allows the content-script to make UpdateRequest
  * calls to update the state, and receive state updates through Update messages.
  */
 function connectContentScript(contentScript) {
-    let abortSignal = {aborted: false};
-
-    const abort = () => {
-        // Use the signal we stored for this tab to signal all pending
-        // translation promises to not resolve.
-        abortSignal.aborted = true;
-        
-        // Also prune any pending translation requests that have this same
-        // signal from the queue. No need to put any work into it.
-        if (provider.instantiated)
-            provider.then(provider => {
-                provider.remove((request) => request._abortSignal.aborted);
-            });
-
-        // Create a new signal in case we want to start translating again.
-        abortSignal = {aborted: false};
-    };
+    // Mark all requests with a number so we know which to remove from the queue.
+    let connection = ++serial;
 
     const tabId = contentScript.sender.tab.id;
 
@@ -170,9 +157,18 @@ function connectContentScript(contentScript) {
     });
 
     // If the content-script stops (i.e. user navigates away)
-    contentScript.onDisconnect.addListener(() => abort());
+    contentScript.onDisconnect.addListener(async () => {
+        const cancelled = connection;
+        connection = null;
+
+        // Prune any pending translation requests that have this same
+        // signal from the queue.
+        if (provider.instantiated)
+            provider.then(translator => translator.remove('connection', cancelled));
+    });
 
     handler.on("TranslateRequest", async (data) => {
+        // Update translation state stats for this tab
         local.get(tabId).get({
                 pendingTranslationRequests: 0,
                 totalTranslationRequests: 0,
@@ -196,16 +192,16 @@ function connectContentScript(contentScript) {
 
         try {
             const translator = await provider
-            const response = await translator.translate({...data, abortSignal});
-            if (!response.request.abortSignal.aborted) {
+            const response = await translator.translate({...data, connection});
+            if (response.request.connection === connection) {
                 contentScript.postMessage({
                     command: "TranslateResponse",
                     data: response
                 });
             }
         } catch(e) {
-            // Catch error messages caused by abort()
-            if (e?.message === 'removed by filter' && e?.request?.abortSignal?.aborted)
+            // Catch error messages caused by the disconnect
+            if (e?.message === 'removed by filter' || e?.request?.connection !== connection)
                 return;
 
             console.error('Error during translation', e);
@@ -315,8 +311,6 @@ compat.tabs.onCreated.addListener(async ({id: tabId, openerTabId}) => {
         });
     }
 
-    console.log('Setting', tabId, inheritedState);
-
     session.get(tabId).set(inheritedState);
 });
 
@@ -330,14 +324,13 @@ compat.tabs.onUpdated.addListener(async (tabId, diff, tab) => {
 
         // If we changed domain, reset from, to and domain.
         if (!isSameDomain(diff.url, state.url)) {
-            console.log('different domain', tabId, diff.url, 'was', state.url);
             Object.assign(state, {
                 translate: await isTranslatedDomain(diff.url),
                 from: undefined,
                 to: undefined
             });
         }
-        
+
         session.get(tabId).set({
             ...state,
             url: diff.url
@@ -351,8 +344,6 @@ compat.tabs.onUpdated.addListener(async (tabId, diff, tab) => {
             to: undefined
         });
 
-        console.log('tabState status=complete', translate, from, to);
-
         if (translate && from && to) {
             compat.tabs.sendMessage(tabId, {
                 command: 'TranslatePage',
@@ -361,7 +352,7 @@ compat.tabs.onUpdated.addListener(async (tabId, diff, tab) => {
         }
     }
     
-    // Todo: treat reload and link different? Reload -> disable translation?
+    // TODO: treat reload and link different? Reload -> disable translation?
 });
 
 const handler = new MessageHandler(callback => {
@@ -382,16 +373,14 @@ handler.on('DetectLanguage', async (data, sender) => {
         const {from, to, models} = await detectLanguage(data, (await provider).registry, {preferred})
         session.get(sender.tab.id).set({from, to, models});
 
+        // Should this page be translated?
         const {translate} = await session.get(sender.tab.id).get({translate: false});
-
-        console.log('detectLanguage', translate, from, to);
-
-        if (translate)
+        if (translate) {
             compat.tabs.sendMessage(sender.tab.id, {
                 command: 'TranslatePage',
                 data: {from, to}
             });
-
+        }
     } catch (error) {
         console.error('Error during language detection', error);
         compat.runtime.sendMessage({

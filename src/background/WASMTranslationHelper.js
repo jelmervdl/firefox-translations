@@ -371,8 +371,8 @@ export default class WASMTranslationHelper {
         return this.translator.translate(request); // returns promise
     }
 
-    remove(filter) {
-        return this.translator.remove(filter);
+    remove(key, value) {
+        return this.translator.remove((request) => request[key] === value);
     }
 
     delete() {

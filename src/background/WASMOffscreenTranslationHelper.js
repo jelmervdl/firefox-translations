@@ -114,8 +114,8 @@ export default class WASMOffscreenTranslationHelper {
         return this.#call('translate', [request]);
     }
 
-    remove(filter) {
-        // Haha not implemented yet
+    remove(key, value) {
+        this.#call('remove', [key, value]);
     }
 
     delete() {

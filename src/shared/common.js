@@ -402,10 +402,9 @@ export class MessageHandler {
 		this.#listeners = new Map();
 
 		register((message, ...rest) => {
-			if (!this.#listeners.has(message.command))
+			if (!this.#listeners.has(message.command)) {
 				console.warn('Received unhandled message', message);
-			else {
-				console.info('Received', message);
+			} else {
 				this.#listeners.get(message.command)(message.data, ...rest);
 			}
 		})
