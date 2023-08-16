@@ -101,9 +101,10 @@ async function main(tab) {
 		// downloading. This info is not always entirely up-to-date since `local`
 		// is a getter when queried from WASMTranslationHelper, but that doesn't
 		// survive the message passing we use to get state.
-		const modelsToDownload = models.size === 0 ? [] : tabState.models[0]
+		const modelsToDownload = models.size === 0 ? [] : tabState.models
+			?.find(({from, to}) => from === tabState.from && to === tabState.to) // find model we'd use (TODO: What if we can pivot through multiple options?)
 			?.models
-			?.filter(id => !models.get(id).local)
+			?.filter(id => !models.get(id).model.local)
 			?.map(id => models.get(id).model.name);
 
 		const renderState = {
