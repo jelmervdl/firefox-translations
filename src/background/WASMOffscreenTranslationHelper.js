@@ -82,7 +82,7 @@ export default class WASMOffscreenTranslationHelper {
         this.#connection.postMessage({...data, id});
     }
 
-    async #call(name, args, PromiseImpl=Promise) {
+    #call(name, args, PromiseImpl=Promise) {
         return new PromiseImpl(async (...callbacks) => {
             await this.#initialized;
             this.#sendMessage({
