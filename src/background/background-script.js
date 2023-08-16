@@ -60,12 +60,6 @@ function updateMenuItems({data, target: {state}}) {
 */
 
 /**
- * Popup port per tab
- *@type {Map<Number,Port>}
- */
-const popups = new Map();
-
-/**
  * Session storage per tab. Used for state.
  *@type {Map<Number,StorageArea>}
  */
@@ -251,10 +245,7 @@ function connectContentScript(contentScript) {
 async function connectPopup(port) {
     const tabId = parseInt(port.name.slice('popup-'.length));
 
-    popups.set(tabId, port);
-
-    port.onDisconnect.addListener(() => popups.delete(tabId));
-
+    // Tell popup which translation models are available
     provider.then(async (translator) => {
         port.postMessage({
             command: 'Models',
@@ -262,12 +253,35 @@ async function connectPopup(port) {
         })
     });
 
-    local.get(tabId).get().then(data => {
+    const keys = [
+        'pendingTranslationRequests',
+        'totalTranslationRequests',
+        'modelDownloadRead',
+        'modelDownloadSize',
+    ];
+    
+    // Initial progress update
+    local.get(tabId).get(Object.fromEntries(keys.map(key => [key, 0]))).then(data => {
         port.postMessage({
             command: 'Progress',
             data
         });
     });
+
+    // Updates when progress changes
+    const stopProgressUpdates = local.get(tabId).listen(keys, data => {
+        port.postMessage({
+            command: 'Progress',
+            data
+        });
+    });
+
+    // Note: all other state is synced through chrome.storage.session. Only
+    // progress is not because it is very chatty, and only relevant when the
+    // background page exists so there's no reason to store it in session.
+
+    // Stop progress updates if the popup is closed
+    port.onDisconnect.addListener(stopProgressUpdates);
 }
 
 // Receive incoming connection requests from content-script and popup.
@@ -415,12 +429,6 @@ handler.on("DownloadModels", async ({tabId, from, to, models}) => {
                     modelDownloadRead: Array.from(downloads.values()).reduce((sum, {read}) => sum + read, 0),
                     modelDownloadSize: Array.from(downloads.values()).reduce((sum, {size}) => sum + size, 0)
                 })
-
-                // Tell the popup (if there is one) about the progress :D
-                popups.get(tabId)?.postMessage({
-                    command: 'Progress',
-                    data
-                });
             });
         }
 
