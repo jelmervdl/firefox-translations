@@ -75,6 +75,22 @@ const firefoxOptions = true ? {} : {
 
 const DEFAULT_TARGET = 'firefox-desktop';
 
+// Linting failures that should not be treated as a failure during build
+// (Note: they'll still show as errors, but they won't stop the build.)
+const lintFilters = {
+  [DEFAULT_TARGET]: [],
+  'chromium': [
+    {
+      code: "MANIFEST_FIELD_UNSUPPORTED",
+      file: 'manifest.json'
+    },
+    {
+      code: 'EXTENSION_ID_REQUIRED',
+      file: 'manifest.json'
+    }
+  ]
+};
+
 export default (env) => ({
   module,
   mode: 'development',
@@ -164,8 +180,10 @@ export default (env) => ({
     }),
     new WebExtPlugin({
       target: env.target || DEFAULT_TARGET,
-      ignoreKnownChromeLintFailures: true,
+      filterLintFailures: lintFilters[env.target],
       sourceDir: distPath,
+      buildPackage: true,
+      overwriteDest: true,
       firefox: 'nightly',
       ...firefoxOptions
     })

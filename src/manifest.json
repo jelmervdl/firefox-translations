@@ -1,10 +1,10 @@
 {
 	"manifest_version": 3,
-	"name": "TranslateLocally web extension",
+	"name": "TranslateLocally Webextension",
 	"name<firefox-desktop>": "TranslateLocally for Firefox",
 	"name<chromium>": "TranslateLocally for Chrome",
 	"version": "0.0.1",
-	"browser_specific_settings":
+	"browser_specific_settings<firefox-desktop>":
 	{
 		"gecko":
 		{
@@ -84,6 +84,7 @@
 			]
 		}
 	],
-	"description": "TranslateLocally for Firefox is a webextension that enables client side in-page translations for web browsers. It is a stand-alone extension, but can integrate with TranslateLocally for custom models and even better performance.",
-	"homepage_url": "https://github.com/jelmervdl/translatelocally-webext"
+	"description<firefox-desktop>": "TranslateLocally for Firefox is a webextension that enables local and private translation of web pages.",
+	"description<chromium>": "TranslateLocally for Chrome is a webextension that enables local and private translation of web pages.",
+	"homepage_url": "https://github.com/jelmervdl/translatelocally-web-ext"
 }

@@ -3,9 +3,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build:dev": "webpack --mode=development --node-env=development",
-    "build:extension": "webpack --mode=production --node-env=production",
-    "build:xpi": "web-ext build -s extension --overwrite-dest  --no-config-discovery -n translatelocally.xpi",
-    "build": "npm run build:extension && npm run build:xpi",
+    "build": "webpack --mode=production --node-env=production",
     "sign": "npm run build:xpi && web-ext sign --quiet -s extension --no-config-discovery --channel listed",
     "watch": "webpack --mode=development --watch"
   },
