@@ -419,17 +419,14 @@ handler.on("DownloadModels", async ({tabId, from, to, models}) => {
     // For each download promise, add a progress listener that updates the tab state
     // with how far all our downloads have progressed so far.
     downloads.forEach((_, promise) => {
-        // (not supported by the Chrome offscreen proxy implementation right now)
-        if (promise.addProgressListener) {
-            promise.addProgressListener(async ({read, size}) => {
-                // Update download we got a notification about
-                downloads.set(promise, {read, size});
+        promise.addProgressListener(({read, size}) => {
+            // Update download we got a notification about
+            downloads.set(promise, {read, size});
 
-                // Update tab state about all downloads combined (i.e. model, optionally pivot)
-                updatePopupDownloadProgress(tabId);
-            });
-        }
-
+            // Update popup state about all downloads combined (i.e. model, optionally pivot)
+            updatePopupDownloadProgress(tabId);
+        });
+        
         promise.then(async () => {
             // Trigger update of state.models because the `local`
             // property this model has changed. We don't support
