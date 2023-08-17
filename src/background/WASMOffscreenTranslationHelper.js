@@ -122,6 +122,10 @@ export default class WASMOffscreenTranslationHelper {
         if (this.#connection)
             this.#connection.disconnect();
 
+        // Try to close the document as well
+        // TODO: does this race?
+        chrome.offscreen.closeDocument();
+
         this.#initialized = null;
     }
 }

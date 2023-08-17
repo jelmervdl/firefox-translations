@@ -186,8 +186,8 @@ export default class TLTranslationHelper {
             // Also update this.registry to reflect that this model is now local
             response.then(async () => {
                 const models = await this.registry;
-                const model = models.find(({model: id}) => id === modelID);
-                model.local = true;
+                const model = models.find(({model:{id}}) => id === modelID);
+                model.model.local = true;
             })
         });
     }
