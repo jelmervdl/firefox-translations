@@ -183,6 +183,7 @@ export default (env) => ({
       filterLintFailures: lintFilters[env.target],
       sourceDir: distPath,
       buildPackage: true,
+      outputFilename: `translatelocally-${env.target || DEFAULT_TARGET}.zip`,
       overwriteDest: true,
       firefox: 'nightly',
       ...firefoxOptions
