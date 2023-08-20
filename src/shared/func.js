@@ -4,7 +4,7 @@
  * @returns {Promise<T>} promise that only calls `factory` when `then()` is first called
  */
 export function lazy(factory) {
-    let promise = null;
+    let promise = null, destructor = () => {};
 
     return {
         get instantiated() {
@@ -14,7 +14,7 @@ export function lazy(factory) {
         then(...args) {
             // Ask for the actual promise
             if (promise === null) {
-                promise = factory();
+                promise = factory(this);
             
                 if (typeof promise?.then !== 'function')
                     throw new TypeError('factory() did not return a promise-like object');
@@ -22,6 +22,19 @@ export function lazy(factory) {
 
             // Forward the current call to the promise
             return promise.then(...args);
+        },
+
+        onReset(callback) {
+            destructor = callback;
+        },
+
+        reset() {
+            if (promise === null)
+                return;
+
+            promise = null;
+            
+            destructor();
         }
     };
 }

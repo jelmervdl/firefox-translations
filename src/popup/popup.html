@@ -21,6 +21,7 @@
 				overflow: hidden;
 				background: Canvas;
 				color: CanvasText;
+				font: caption;
 			}
 
 			.states > * {
@@ -66,48 +67,44 @@
 	<body>
 		<!-- Warning: the `data-bind:hidden="state != ..."` is confusing because of the double negative -->
 		<div class="states">
-			<div data-bind:hidden="state != 'translation-available' && state != 'translation-aborted'">
+			<div data-bind:hidden="translate || !models || modelDownloadSize != modelDownloadRead">
 				<p>Wanna translate this page?</p>
 				<select id="lang-from" data-bind:options="langFromOptions" data-bind:value="from" required></select>
 				<select id="lang-to" data-bind:options="langToOptions" data-bind:value="to" required></select>
 				<button class="download-btn" class="primary" data-bind:hidden="!needsDownload">Download language &amp; Translate page</button>
-				<button class="translate-btn" class="primary" data-bind:hidden="needsDownload">Translate page</button>
+				<button class="translate-btn" class="primary" data-bind:hidden="needsDownload" data-bind:title="modelsToDownload ? `Download ${modelsToDownload.join(', ')}` : ''">Translate page</button>
 			</div>
-			<div data-bind:hidden="state != 'downloading-models'">
+			<div data-bind:hidden="!translate || modelDownloadSize == modelDownloadRead">
 				<p>Downloading language model…</p>
 				<progress data-bind:value="modelDownloadRead" data-bind:max="modelDownloadSize"></progress>
 			</div>
-			<div data-bind:hidden="state != 'translation-in-progress'">
+			<div data-bind:hidden="!translate || modelDownloadSize != modelDownloadRead || pendingTranslationRequests == 0">
 				<p>Translating page from <span data-bind:text-content="langFromName"></span> to <span data-bind:text-content="langToName"></span>…</p>
 				<progress data-bind:value="completedTranslationRequests" data-bind:max="totalTranslationRequests"></progress>	
 				<button class="abort-translate-btn">Stop translating</button>
 			</div>
-			<div data-bind:hidden="state != 'translation-completed'">
+			<div data-bind:hidden="!translate || modelDownloadSize != modelDownloadRead || pendingTranslationRequests > 0">
 				<p>Translated page from <span data-bind:text-content="langFromName"></span> to <span data-bind:text-content="langToName"></span>.</p>
 				<button class="abort-translate-btn">Show original</button>
 			</div>
-			<div data-bind:hidden="state != 'translation-error'">
+			<div data-bind:hidden="!error || !translate">
 				<p>Error during translation:</p>
 				<p><code data-bind:text-content="error"></code></p>
 				<button class="abort-translate-btn">Stop translating</button>
 			</div>
-			<div data-bind:hidden="state != 'page-error'">
+			<div data-bind:hidden="!error || translate">
 				<p>Error:</p>
 				<p><code data-bind:text-content="error"></code></p>
 			</div>
-			<div data-bind:hidden="state != 'page-loading'">
+			<div data-bind:hidden="models">
 				<!-- tab noticed by webRequest, but its content-script didn't connect -->
 				<p>Translations not available for this page.</p>
 			</div>
-			<div data-bind:hidden="state != 'page-loaded'">
+			<div data-bind:hidden="hasModelList">
 				<p>Downloading list of available language models…</p>
 			</div>
-			<div data-bind:hidden="state != ''">
-				<!-- tab that has gone unnoticed by webRequest? -->
-				<p>Translations not available for this page.</p>
-			</div>
 		</div>
-		<label data-bind:hidden="!(['translation-in-progress', 'translation-completed', 'translation-aborted']).includes(state) || !domain" data-bind:title="`Automatically start translating pages on ${domain}`">
+		<label data-bind:hidden="!models || !domain" data-bind:title="`Automatically start translating pages on ${domain}`">
 			<input type="checkbox" data-bind:checked="alwaysTranslateDomains.includes(domain)" id="always-translate-domain-toggle">
 			Always translate <span data-bind:text-content="domain"></span>
 		</label>

@@ -25,7 +25,7 @@ globalState.addListener(render);
 
 // Store value if we changed it on the options page
 addBoundElementListeners(document.body, (key, value) => {
-	preferences.set(key, value);
+	preferences.set({[key]: value});
 });
 
 function canTranslateLocally() {

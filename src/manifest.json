@@ -1,29 +1,44 @@
 {
-	"manifest_version": 2,
-	"name": "TranslateLocally for Firefox",
+	"manifest_version": 3,
+	"name": "TranslateLocally Webextension",
+	"name<firefox-desktop>": "TranslateLocally for Firefox",
+	"name<chromium>": "TranslateLocally for Chrome",
 	"version": "0.0.1",
-	"version_name": "development",
-	"browser_specific_settings":
+	"browser_specific_settings<firefox-desktop>":
 	{
 		"gecko":
 		{
-			"strict_min_version": "90.0",
+			"strict_min_version": "101.0",
 			"id": "{2fa36771-561b-452c-b6c3-7486f42c25ae}"
 		}
 	},
+	"key<chromium>": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4LNwumwaTSyvYwCcqt+l7kAb2UR5V3JWC9fdVVj2ripvYu+ZAT0wT2/nrVWwduJ287cb1q00lQ/PafSGKSxRKKZQY0iPp1g6n0s2xYGcRvbB/cpGc969EE7ZkMzGyrz9UVM593Os1ilrrCzjjn5tOhipo63q1B8kas6sY+E1vLX019NfwGgsNXovlU6jWaG7s4vMF6VyE5ZEQUYL+Qs7FMeeZGuwC4Zip/Ij1l9ZWtNXg6u7S7Df91xs8MkxG4eKITYGvn35JEpt4wCi7P5y6x5SF00z9io0hoKT9VfVBd94r1XB03ZHgo5W832Aru1oGTCKc9TeSWdhb8tGxmwLmwIDAQAB",
 	"permissions":
 	[
-		"<all_urls>",
 		"contextMenus",
 		"tabs",
 		"storage",
 		"nativeMessaging"
 	],
-	"background":
+	"permissions<chromium>":
+	[
+		"offscreen"
+	],
+	"host_permissions": [
+		"https://translatelocally.com/models.json",
+		"https://data.statmt.org/bergamot/models/*"
+	],
+	"background<firefox-desktop>":
 	{
 		"scripts": ["background-script.js"]
 	},
-	"content_security_policy": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+	"background<chromium>":
+	{
+		"service_worker": "background-script.js"
+	},
+	"content_security_policy": {
+		"extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+	},	
 	"content_scripts":
 	[
 		{
@@ -38,9 +53,8 @@
 		}
 	],
 	"incognito": "spanning",
-	"browser_action":
+	"action":
 	{
-		"browser_style": true,
 		"default_icon":
 		{
 			"16": "/assets/icons/translateLocally_logo.16.png",
@@ -51,9 +65,7 @@
 		"default_popup": "popup.html"
 	},
 	"options_ui": {
-		"page": "options.html",
-		"browser_style": true,
-		"chrome_style": true
+		"page": "options.html"
 	},
 	"icons":
 	{
@@ -61,10 +73,19 @@
 		"96": "/assets/icons/translateLocally_logo.96.png"
 	},
 	"web_accessible_resources": [
-		"assets/fonts/FlowBlock-Regular.woff2",
-		"assets/fonts/FlowCircular-Regular.woff2",
-		"assets/fonts/FlowRounded-Regular.woff2"
+		{
+			"matches": ["*://*/*"],
+			"resources": [
+				"assets/fonts/FlowBlock-Regular.woff2",
+				"assets/fonts/FlowCircular-Regular.woff2",
+				"assets/fonts/FlowRounded-Regular.woff2",
+				"OutboundTranslation.css",
+				"InPageTranslation.css",
+				"SelectionTranslation.css"
+			]
+		}
 	],
-	"description": "TranslateLocally for Firefox is a webextension that enables client side in-page translations for web browsers. It is a stand-alone extension, but can integrate with TranslateLocally for custom models and even better performance.",
-	"homepage_url": "https://github.com/jelmervdl/translatelocally-webext"
+	"description<firefox-desktop>": "TranslateLocally for Firefox is a webextension that enables local and private translation of web pages.",
+	"description<chromium>": "TranslateLocally for Chrome is a webextension that enables local and private translation of web pages.",
+	"homepage_url": "https://github.com/jelmervdl/translatelocally-web-ext"
 }
